@@ -1,0 +1,57 @@
+{
+  "entities": {
+    "Installment": {
+      "title": "Installment",
+      "description": "Represents a single payment installment for a loan",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "numero": { "type": "number" },
+        "montoTotal": { "type": "number" },
+        "capital": { "type": "number" },
+        "interes": { "type": "number" },
+        "saldoRestante": { "type": "number" },
+        "fechaVencimiento": { "type": "string" },
+        "pagado": { "type": "boolean" },
+        "fechaPago": { "type": "string" }
+      },
+      "required": ["id", "numero", "montoTotal", "capital", "interes", "saldoRestante", "fechaVencimiento", "pagado"]
+    },
+    "Loan": {
+      "title": "Loan",
+      "description": "Represents an active loan for a client",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "montoOriginal": { "type": "number" },
+        "tasaInteresMensual": { "type": "number" },
+        "plazoMeses": { "type": "number" },
+        "fechaInicio": { "type": "string" },
+        "estado": { "type": "string" },
+        "cuotas": { "type": "array" }
+      },
+      "required": ["id", "montoOriginal", "tasaInteresMensual", "plazoMeses", "fechaInicio", "estado", "cuotas"]
+    },
+    "Client": {
+      "title": "Client",
+      "description": "Represents a registered client of CrediULEP",
+      "type": "object",
+      "properties": {
+        "cedula": { "type": "string" },
+        "contrasena": { "type": "string" },
+        "nombre": { "type": "string" },
+        "correo": { "type": "string" },
+        "telefono": { "type": "string" },
+        "direccion": { "type": "string" },
+        "prestamo": { "type": "object" }
+      },
+      "required": ["cedula", "contrasena", "nombre", "correo", "telefono", "direccion"]
+    }
+  },
+  "firestore": {
+    "clients/{cedula}": {
+      "schema": "Client",
+      "description": "The collection of clients registered in CrediULEP"
+    }
+  }
+}

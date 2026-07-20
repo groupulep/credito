@@ -1,0 +1,6 @@
+{
+  "name": "CrediULEP",
+  "description": "Sistema inmersivo para la administración, simulación y seguimiento interactivo de créditos e iniciativas de financiamiento social.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
