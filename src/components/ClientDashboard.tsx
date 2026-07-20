@@ -26,19 +26,22 @@ import {
   Sparkles,
   User,
   Landmark,
-  ShieldCheck
+  ShieldCheck,
+  Bell
 } from 'lucide-react';
-import { Client, UserSession, Installment } from '../types';
-import { formatCurrency } from '../utils';
+import { Client, UserSession, Installment, Message } from '../types';
+import { formatCurrency, saveDatabase } from '../utils';
+import { sendPushNotification } from '../App';
 
 interface ClientDashboardProps {
   session: UserSession;
   clients: Client[];
+  setClients: React.Dispatch<React.SetStateAction<Client[]>>;
   onLogout: () => void;
   syncError?: string | null;
 }
 
-export default function ClientDashboard({ session, clients, onLogout, syncError }: ClientDashboardProps) {
+export default function ClientDashboard({ session, clients, setClients, onLogout, syncError }: ClientDashboardProps) {
   // Find current client profile in reactive database
   const clientData = useMemo(() => {
     return clients.find((c) => c.cedula === session.cedula) || null;
@@ -47,6 +50,11 @@ export default function ClientDashboard({ session, clients, onLogout, syncError 
   const [requestedAmount, setRequestedAmount] = useState<number>(2000000); // Default to $2,000,000 COP
   const [paymentFilter, setPaymentFilter] = useState<'all' | 'pending' | 'paid'>('all');
   const [showProfile, setShowProfile] = useState<boolean>(false);
+  const [typedMessage, setTypedMessage] = useState('');
+  const [notificationStatus, setNotificationStatus] = useState<NotificationPermission>(
+    'Notification' in window ? Notification.permission : 'default'
+  );
+  const [testFeedback, setTestFeedback] = useState<string | null>(null);
 
   const initials = useMemo(() => {
     if (!clientData) return 'C';
@@ -205,6 +213,63 @@ export default function ClientDashboard({ session, clients, onLogout, syncError 
 
     const url = `https://api.whatsapp.com/send?phone=${adminPhone}&text=${encodeURIComponent(text)}`;
     window.open(url, '_blank', 'noreferrer');
+  };
+
+  const requestNotificationPermission = async () => {
+    if (!('Notification' in window)) {
+      setTestFeedback('Este navegador no soporta notificaciones de escritorio.');
+      return;
+    }
+    try {
+      const permission = await Notification.requestPermission();
+      setNotificationStatus(permission);
+      if (permission === 'granted') {
+        sendPushNotification(
+          '¡Notificaciones Activas! 🔔',
+          'Recibirás notificaciones inmediatas sobre tu crédito y mensajes del administrador.'
+        );
+      }
+    } catch (e) {
+      console.error('Error requesting notification permission', e);
+    }
+  };
+
+  const handleTestNotification = () => {
+    if (notificationStatus !== 'granted') {
+      requestNotificationPermission();
+      return;
+    }
+    sendPushNotification(
+      'Prueba de Notificación Push 🚀',
+      '¡Tu Service Worker de CrediULEP está funcionando correctamente!'
+    );
+    setTestFeedback('¡Notificación de prueba enviada con éxito!');
+    setTimeout(() => setTestFeedback(null), 4000);
+  };
+
+  const handleSendMessage = () => {
+    if (!typedMessage.trim() || !clientData) return;
+    const newMsg: Message = {
+      id: Math.random().toString(36).substring(2, 9),
+      remitente: 'cliente',
+      texto: typedMessage.trim(),
+      fecha: new Date().toISOString()
+    };
+    
+    setClients((prevClients) => {
+      return prevClients.map((c) => {
+        if (c.cedula === clientData.cedula) {
+          const currentMsgs = c.mensajes || [];
+          return {
+            ...c,
+            mensajes: [...currentMsgs, newMsg]
+          };
+        }
+        return c;
+      });
+    });
+    
+    setTypedMessage('');
   };
 
   if (!clientData) {
@@ -450,6 +515,152 @@ export default function ClientDashboard({ session, clients, onLogout, syncError 
             </motion.section>
           )}
         </AnimatePresence>
+
+        {/* Centro de Notificaciones */}
+        <motion.section
+          initial={{ opacity: 0, y: 15 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="bg-white border border-purple-100 rounded-3xl p-6 md:p-8 shadow-lg shadow-purple-100/20 max-w-3xl mx-auto w-full"
+          id="client-messages-notifs-panel"
+        >
+          <div className="space-y-6">
+            <div className="flex items-center gap-3 pb-3 border-b border-slate-100">
+              <div className="p-2.5 bg-purple-50 text-purple-600 rounded-2xl border border-purple-100/50">
+                <span className="relative flex h-5 w-5 items-center justify-center">
+                  {notificationStatus === 'granted' && (
+                    <span className="absolute inline-flex h-3 w-3 rounded-full bg-emerald-400 opacity-75 animate-ping"></span>
+                  )}
+                  <ShieldCheck className="w-5 h-5" />
+                </span>
+              </div>
+              <div>
+                <h3 className="text-lg font-extrabold text-slate-900 tracking-tight">Notificaciones Push</h3>
+                <p className="text-xs text-slate-500">Mantente al día sobre tus cuotas, solicitudes y novedades</p>
+              </div>
+            </div>
+
+            <div className="bg-slate-50 p-5 rounded-2xl border border-slate-100/80 space-y-4">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Estado del Servicio</span>
+                {notificationStatus === 'granted' ? (
+                  <span className="px-2.5 py-1 bg-emerald-50 text-emerald-700 border border-emerald-100 rounded-lg text-xs font-bold flex items-center gap-1.5">
+                    <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                    Activo (Vía SW)
+                  </span>
+                ) : notificationStatus === 'denied' ? (
+                  <span className="px-2.5 py-1 bg-rose-50 text-rose-700 border border-rose-100 rounded-lg text-xs font-bold">
+                    Bloqueado ⚠️
+                  </span>
+                ) : (
+                  <span className="px-2.5 py-1 bg-amber-50 text-amber-700 border border-amber-100 rounded-lg text-xs font-bold">
+                    No Configurado
+                  </span>
+                )}
+              </div>
+
+              <p className="text-xs text-slate-600 leading-relaxed">
+                {notificationStatus === 'granted'
+                  ? 'Excelente. El Service Worker está configurado para recibir alertas del sistema e informarte en tiempo real sobre aprobaciones de créditos, recordatorios de pago de cuotas y otras novedades importantes de CrediULEP.'
+                  : notificationStatus === 'denied'
+                  ? 'Has bloqueado las notificaciones en este navegador. Para estar al día, por favor haz clic en el candado de la barra de direcciones de tu navegador y activa los permisos de notificación.'
+                  : 'Activa las notificaciones automáticas para recibir alertas inmediatas de tu saldo, aprobaciones de préstamos y recordatorios de vencimiento de cuotas.'}
+              </p>
+
+              <div className="pt-2 space-y-3">
+                {notificationStatus !== 'granted' && (
+                  <button
+                    onClick={requestNotificationPermission}
+                    className="w-full py-3 px-4 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white font-bold rounded-2xl shadow-md shadow-purple-500/10 active:scale-[0.98] transition-all cursor-pointer text-sm"
+                    id="btn-enable-notifications"
+                  >
+                    Habilitar Notificaciones Push
+                  </button>
+                )}
+
+                {notificationStatus === 'granted' && (
+                  <button
+                    onClick={handleTestNotification}
+                    className="w-full py-3 px-4 bg-white border border-purple-200 hover:border-purple-300 text-purple-700 font-bold rounded-2xl shadow-sm hover:bg-purple-50 active:scale-[0.98] transition-all cursor-pointer text-sm"
+                    id="btn-test-notification"
+                  >
+                    Enviar Notificación de Prueba
+                  </button>
+                )}
+
+                {testFeedback && (
+                  <p className="text-center text-xs font-semibold text-emerald-600 animate-bounce">
+                    {testFeedback}
+                  </p>
+                )}
+              </div>
+            </div>
+
+            {/* Lista de Notificaciones de la Administración */}
+            <div className="border-t border-slate-100 pt-6 space-y-4" id="client-received-notifications-subpanel">
+              <h4 className="text-sm font-extrabold text-slate-800 flex items-center gap-2">
+                <Bell className="w-4 h-4 text-purple-600" />
+                Historial de Alertas de CrediULEP
+              </h4>
+
+              {(!clientData.notificaciones || clientData.notificaciones.length === 0) ? (
+                <div className="bg-slate-50/50 p-6 rounded-2xl text-center text-xs text-slate-400 font-medium italic border border-dashed border-slate-200">
+                  No tienes comunicados o alertas pendientes. ¡Estás al día con todo!
+                </div>
+              ) : (
+                <div className="space-y-3 max-h-[300px] overflow-y-auto pr-1">
+                  {clientData.notificaciones.map((notif) => (
+                    <div
+                      key={notif.id}
+                      className={`p-4 rounded-2xl border transition-all flex flex-col gap-1.5 ${
+                        notif.leido 
+                          ? 'bg-slate-50/50 border-slate-100 text-slate-500' 
+                          : 'bg-purple-50/20 border-purple-100 text-slate-800 shadow-sm'
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-4">
+                        <div className="flex items-center gap-2">
+                          {!notif.leido && (
+                            <span className="h-2 w-2 rounded-full bg-purple-600 shrink-0" title="Nueva" />
+                          )}
+                          <h5 className="text-xs font-black tracking-tight">{notif.titulo}</h5>
+                        </div>
+                        <span className="text-[9px] font-bold text-slate-400 shrink-0">
+                          {new Date(notif.fecha).toLocaleDateString()} {new Date(notif.fecha).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        </span>
+                      </div>
+                      <p className="text-[11px] font-medium leading-relaxed">{notif.mensaje}</p>
+                      
+                      {!notif.leido && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            // Mark as read
+                            const updatedClients = clients.map(c => {
+                              if (c.cedula === clientData.cedula) {
+                                return {
+                                  ...c,
+                                  notificaciones: (c.notificaciones || []).map(n => 
+                                    n.id === notif.id ? { ...n, leido: true } : n
+                                  )
+                                };
+                              }
+                              return c;
+                            });
+                            setClients(updatedClients);
+                            saveDatabase(updatedClients);
+                          }}
+                          className="self-end text-[10px] font-bold text-purple-600 hover:text-purple-700 hover:underline cursor-pointer"
+                        >
+                          Marcar como leída
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </motion.section>
 
         {/* ----------------- CASE: ACTIVE LOAN ----------------- */}
         {!isPazYSalvo && loanStats && clientData.prestamo && (

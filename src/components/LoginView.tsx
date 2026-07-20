@@ -5,7 +5,7 @@
 
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Eye, EyeOff, Sparkles, LogIn, AlertCircle, Shield, User, KeyRound, RefreshCw } from 'lucide-react';
+import { Eye, EyeOff, Sparkles, LogIn, AlertCircle, Shield, User, KeyRound, RefreshCw, UserPlus, Phone, DollarSign } from 'lucide-react';
 import { Client, UserSession } from '../types';
 
 interface LoginViewProps {
@@ -15,12 +15,19 @@ interface LoginViewProps {
 }
 
 export default function LoginView({ clients, onLoginSuccess, syncError }: LoginViewProps) {
+  const [activeMode, setActiveMode] = useState<'login' | 'register'>('login');
   const [cedula, setCedula] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [acceptDataTreatment, setAcceptDataTreatment] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+
+  // Registration state
+  const [regNombre, setRegNombre] = useState('');
+  const [regCedula, setRegCedula] = useState('');
+  const [regCelular, setRegCelular] = useState('');
+  const [regAcceptDataTreatment, setRegAcceptDataTreatment] = useState(false);
 
   // Math Captcha state
   const [captchaNum1, setCaptchaNum1] = useState(Math.floor(Math.random() * 9) + 1);
@@ -87,6 +94,37 @@ export default function LoginView({ clients, onLoginSuccess, syncError }: LoginV
       }
       setIsLoading(false);
     }, 800);
+  };
+
+  const handleRegisterSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+
+    if (!regNombre.trim() || !regCedula.trim() || !regCelular.trim()) {
+      setError('Por favor complete los campos obligatorios: Nombre, Cédula y Celular de contacto.');
+      return;
+    }
+
+    if (!regAcceptDataTreatment) {
+      setError('Debe aceptar el tratamiento de datos personales para continuar.');
+      return;
+    }
+
+    setIsLoading(true);
+
+    setTimeout(() => {
+      const adminPhone = '573001234567';
+      const text = `Hola CrediULEP, deseo solicitar mi registro como nuevo socio afiliado. Mis datos son:
+- Nombre Completo: ${regNombre.trim()}
+- Cédula de Ciudadanía: ${regCedula.trim()}
+- Celular de Contacto: ${regCelular.trim()}
+
+Autorizo el tratamiento de mis datos personales (Habeas Data) para el proceso de estudio y afiliación. Quedo atento a su respuesta.`;
+
+      const url = `https://api.whatsapp.com/send?phone=${adminPhone}&text=${encodeURIComponent(text)}`;
+      window.open(url, '_blank', 'noreferrer');
+      setIsLoading(false);
+    }, 600);
   };
 
   return (
@@ -214,145 +252,304 @@ export default function LoginView({ clients, onLoginSuccess, syncError }: LoginV
 
           <div className="my-auto space-y-6">
             <div className="text-left hidden lg:block">
-              <h2 className="text-2xl font-black text-slate-900 tracking-tight">Acceso Seguro</h2>
-              <p className="text-xs text-slate-400 font-medium mt-1">Ingresa tu número de identificación y contraseña asignada para ingresar al portal bancario.</p>
+              <h2 className="text-2xl font-black text-slate-900 tracking-tight">
+                {activeMode === 'login' ? 'Acceso Seguro' : 'Solicitar Registro'}
+              </h2>
+              <p className="text-xs text-slate-400 font-medium mt-1">
+                {activeMode === 'login'
+                  ? 'Ingresa tu número de identificación y contraseña asignada para ingresar al portal bancario.'
+                  : 'Completa tus datos para enviarlos a la administración vía WhatsApp e iniciar tu proceso de afiliación.'}
+              </p>
             </div>
 
-            {/* Form */}
-            <form onSubmit={handleSubmit} className="space-y-5" id="login-form">
-              <div className="space-y-1.5">
-                <label className="text-[11px] font-bold text-slate-500 tracking-wider uppercase flex items-center gap-1.5">
-                  <User className="w-3.5 h-3.5 text-purple-600" />
-                  Cédula de Ciudadanía
-                </label>
-                <div className="relative">
-                  <input
-                    type="text"
-                    placeholder="Ej: 1020304050"
-                    value={cedula}
-                    onChange={(e) => setCedula(e.target.value)}
-                    disabled={isLoading}
-                    className="w-full bg-slate-50 border border-slate-200 focus:border-purple-500 focus:bg-white focus:ring-4 focus:ring-purple-500/10 rounded-2xl py-3 px-4 text-slate-800 placeholder-slate-400 font-semibold transition-all duration-300 outline-none text-base"
-                  />
-                </div>
-              </div>
+            {/* Premium segmented control */}
+            <div className="bg-slate-100 p-1 rounded-2xl flex gap-1 border border-slate-100 shadow-inner">
+              <button
+                type="button"
+                onClick={() => { setActiveMode('login'); setError(null); }}
+                className={`flex-1 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                  activeMode === 'login'
+                    ? 'bg-white text-purple-700 shadow-sm border border-purple-50/10'
+                    : 'text-slate-500 hover:text-slate-800'
+                }`}
+              >
+                <LogIn className="w-4 h-4" />
+                <span>Ingresar</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => { setActiveMode('register'); setError(null); }}
+                className={`flex-1 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                  activeMode === 'register'
+                    ? 'bg-white text-purple-700 shadow-sm border border-purple-50/10'
+                    : 'text-slate-500 hover:text-slate-800'
+                }`}
+              >
+                <UserPlus className="w-4 h-4" />
+                <span>Registrarme</span>
+              </button>
+            </div>
 
-              <div className="space-y-1.5">
-                <label className="text-[11px] font-bold text-slate-500 tracking-wider uppercase flex items-center gap-1.5">
-                  <KeyRound className="w-3.5 h-3.5 text-purple-600" />
-                  Contraseña Bancaria
-                </label>
-                <div className="relative">
-                  <input
-                    type={showPassword ? 'text' : 'password'}
-                    placeholder="••••••••"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    disabled={isLoading}
-                    className="w-full bg-slate-50 border border-slate-200 focus:border-purple-500 focus:bg-white focus:ring-4 focus:ring-purple-500/10 rounded-2xl py-3 pl-4 pr-11 text-slate-800 placeholder-slate-400 font-semibold transition-all duration-300 outline-none text-base"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword(!showPassword)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 p-1.5 hover:bg-slate-200 rounded-full transition-colors text-slate-400 hover:text-slate-600"
-                    aria-label="Toggle password visibility"
-                  >
-                    {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                  </button>
-                </div>
-              </div>
-
-              {/* CAPTCHA section */}
-              <div className="space-y-2 bg-purple-50/40 p-4 rounded-2xl border border-purple-100/60">
-                <label className="text-[10px] font-bold text-purple-700 tracking-wider uppercase flex items-center gap-1.5">
-                  <Shield className="w-3.5 h-3.5 text-purple-600" />
-                  Verificación de Seguridad
-                </label>
-                <div className="flex items-center gap-3 mt-1">
-                  <div className="bg-white px-4 py-2 rounded-xl font-mono text-sm font-black text-purple-700 select-none tracking-wider border border-purple-100 shadow-sm flex items-center gap-2">
-                    <span>{captchaNum1}</span>
-                    <span className="text-purple-400 font-bold">+</span>
-                    <span>{captchaNum2}</span>
-                    <span className="text-purple-400 font-bold">=</span>
+            <AnimatePresence mode="wait">
+              {activeMode === 'login' ? (
+                <motion.form
+                  key="login-form-pane"
+                  initial={{ opacity: 0, x: -15 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={{ opacity: 0, x: 15 }}
+                  transition={{ duration: 0.2 }}
+                  onSubmit={handleSubmit}
+                  className="space-y-5"
+                  id="login-form"
+                >
+                  <div className="space-y-1.5">
+                    <label className="text-[11px] font-bold text-slate-500 tracking-wider uppercase flex items-center gap-1.5">
+                      <User className="w-3.5 h-3.5 text-purple-600" />
+                      Cédula de Ciudadanía
+                    </label>
+                    <div className="relative">
+                      <input
+                        type="text"
+                        placeholder="Ej: 1020304050"
+                        value={cedula}
+                        onChange={(e) => setCedula(e.target.value)}
+                        disabled={isLoading}
+                        className="w-full bg-slate-50 border border-slate-200 focus:border-purple-500 focus:bg-white focus:ring-4 focus:ring-purple-500/10 rounded-2xl py-3 px-4 text-slate-800 placeholder-slate-400 font-semibold transition-all duration-300 outline-none text-base"
+                      />
+                    </div>
                   </div>
-                  <button
-                    type="button"
-                    onClick={generateCaptcha}
-                    className="p-2 hover:bg-purple-100 text-purple-600 rounded-xl transition-colors border border-purple-100 bg-white shadow-sm cursor-pointer"
-                    title="Cambiar CAPTCHA"
+
+                  <div className="space-y-1.5">
+                    <label className="text-[11px] font-bold text-slate-500 tracking-wider uppercase flex items-center gap-1.5">
+                      <KeyRound className="w-3.5 h-3.5 text-purple-600" />
+                      Contraseña Bancaria
+                    </label>
+                    <div className="relative">
+                      <input
+                        type={showPassword ? 'text' : 'password'}
+                        placeholder="••••••••"
+                        value={password}
+                        onChange={(e) => setPassword(e.target.value)}
+                        disabled={isLoading}
+                        className="w-full bg-slate-50 border border-slate-200 focus:border-purple-500 focus:bg-white focus:ring-4 focus:ring-purple-500/10 rounded-2xl py-3 pl-4 pr-11 text-slate-800 placeholder-slate-400 font-semibold transition-all duration-300 outline-none text-base"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowPassword(!showPassword)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 p-1.5 hover:bg-slate-200 rounded-full transition-colors text-slate-400 hover:text-slate-600"
+                        aria-label="Toggle password visibility"
+                      >
+                        {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* CAPTCHA section */}
+                  <div className="space-y-2 bg-purple-50/40 p-4 rounded-2xl border border-purple-100/60">
+                    <label className="text-[10px] font-bold text-purple-700 tracking-wider uppercase flex items-center gap-1.5">
+                      <Shield className="w-3.5 h-3.5 text-purple-600" />
+                      Verificación de Seguridad
+                    </label>
+                    <div className="flex items-center gap-3 mt-1">
+                      <div className="bg-white px-4 py-2 rounded-xl font-mono text-sm font-black text-purple-700 select-none tracking-wider border border-purple-100 shadow-sm flex items-center gap-2">
+                        <span>{captchaNum1}</span>
+                        <span className="text-purple-400 font-bold">+</span>
+                        <span>{captchaNum2}</span>
+                        <span className="text-purple-400 font-bold">=</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={generateCaptcha}
+                        className="p-2 hover:bg-purple-100 text-purple-600 rounded-xl transition-colors border border-purple-100 bg-white shadow-sm cursor-pointer"
+                        title="Cambiar CAPTCHA"
+                      >
+                        <RefreshCw className="w-3.5 h-3.5 animate-spin-slow" />
+                      </button>
+                      <div className="flex-1">
+                        <input
+                          type="number"
+                          placeholder="Resultado"
+                          value={captchaAnswer}
+                          onChange={(e) => setCaptchaAnswer(e.target.value)}
+                          disabled={isLoading}
+                          className="w-full bg-white border border-purple-100 focus:border-purple-500 focus:ring-4 focus:ring-purple-500/10 rounded-xl py-2 px-3 text-slate-800 placeholder-slate-400 font-semibold text-center text-sm outline-none transition-all"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Personal Data Treatment (Habeas Data) Acceptance Checkbox */}
+                  <div className="flex items-start gap-3.5 bg-purple-50/20 hover:bg-purple-50/35 border border-purple-100/40 hover:border-purple-200/50 p-4 rounded-2xl transition-all duration-300">
+                    <div className="flex items-center mt-0.5 shrink-0">
+                      <input
+                        type="checkbox"
+                        id="accept-data-treatment"
+                        checked={acceptDataTreatment}
+                        onChange={(e) => setAcceptDataTreatment(e.target.checked)}
+                        disabled={isLoading}
+                        className="w-4.5 h-4.5 text-purple-600 bg-white border-purple-200 rounded-lg focus:ring-purple-500 focus:ring-offset-0 cursor-pointer accent-purple-600"
+                      />
+                    </div>
+                    <label htmlFor="accept-data-treatment" className="text-xs text-slate-500 font-semibold leading-relaxed cursor-pointer select-none">
+                      Acepto el <strong className="font-bold text-slate-700">Tratamiento y Lectura de Datos Personales</strong> (Habeas Data) conforme a la Ley 1581 de Protección de Datos. Autorizo a CrediULEP para la consulta y reporte de mis obligaciones.
+                    </label>
+                  </div>
+
+                  {/* Error message */}
+                  <AnimatePresence mode="wait">
+                    {error && (
+                      <motion.div
+                        initial={{ opacity: 0, y: -10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: -10 }}
+                        className="bg-red-50 border border-red-200 text-red-800 rounded-2xl p-4 flex items-start gap-3"
+                        id="login-error-alert"
+                      >
+                        <AlertCircle className="w-5 h-5 text-red-500 shrink-0 mt-0.5" />
+                        <div className="text-sm font-semibold">
+                          <span className="font-bold text-red-600">Error:</span> {error}
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+
+                  {/* Submit button */}
+                  <motion.button
+                    type="submit"
+                    disabled={isLoading}
+                    whileHover={{ scale: 1.01 }}
+                    whileTap={{ scale: 0.99 }}
+                    className="w-full bg-gradient-to-r from-purple-600 to-purple-700 hover:from-purple-500 hover:to-purple-600 active:from-purple-700 active:to-purple-800 disabled:from-slate-300 disabled:to-slate-400 text-white font-bold py-3.5 rounded-2xl shadow-lg shadow-purple-600/10 transition-all duration-300 flex items-center justify-center gap-2 cursor-pointer mt-2"
+                    id="login-submit-btn"
                   >
-                    <RefreshCw className="w-3.5 h-3.5 animate-spin-slow" />
-                  </button>
-                  <div className="flex-1">
+                    {isLoading ? (
+                      <svg className="animate-spin h-5 w-5 text-white" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                      </svg>
+                    ) : (
+                      <>
+                        <LogIn className="w-5 h-5 text-white/90" />
+                        <span>Ingresar de forma Segura</span>
+                      </>
+                    )}
+                  </motion.button>
+                </motion.form>
+              ) : (
+                <motion.form
+                  key="register-form-pane"
+                  initial={{ opacity: 0, x: 15 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={{ opacity: 0, x: -15 }}
+                  transition={{ duration: 0.2 }}
+                  onSubmit={handleRegisterSubmit}
+                  className="space-y-4"
+                  id="register-form"
+                >
+                  <div className="space-y-1">
+                    <label className="text-[11px] font-bold text-slate-500 tracking-wider uppercase flex items-center gap-1.5">
+                      <User className="w-3.5 h-3.5 text-purple-600" />
+                      Nombre Completo *
+                    </label>
                     <input
-                      type="number"
-                      placeholder="Resultado"
-                      value={captchaAnswer}
-                      onChange={(e) => setCaptchaAnswer(e.target.value)}
+                      type="text"
+                      placeholder="Ej: Juan Carlos Pérez"
+                      value={regNombre}
+                      onChange={(e) => setRegNombre(e.target.value)}
                       disabled={isLoading}
-                      className="w-full bg-white border border-purple-100 focus:border-purple-500 focus:ring-4 focus:ring-purple-500/10 rounded-xl py-2 px-3 text-slate-800 placeholder-slate-400 font-semibold text-center text-sm outline-none transition-all"
+                      className="w-full bg-slate-50 border border-slate-200 focus:border-purple-500 focus:bg-white focus:ring-4 focus:ring-purple-500/10 rounded-2xl py-2.5 px-4 text-slate-800 placeholder-slate-400 font-semibold transition-all outline-none text-sm"
                     />
                   </div>
-                </div>
-              </div>
 
-              {/* Personal Data Treatment (Habeas Data) Acceptance Checkbox */}
-              <div className="flex items-start gap-3.5 bg-purple-50/20 hover:bg-purple-50/35 border border-purple-100/40 hover:border-purple-200/50 p-4 rounded-2xl transition-all duration-300">
-                <div className="flex items-center mt-0.5 shrink-0">
-                  <input
-                    type="checkbox"
-                    id="accept-data-treatment"
-                    checked={acceptDataTreatment}
-                    onChange={(e) => setAcceptDataTreatment(e.target.checked)}
-                    disabled={isLoading}
-                    className="w-4.5 h-4.5 text-purple-600 bg-white border-purple-200 rounded-lg focus:ring-purple-500 focus:ring-offset-0 cursor-pointer accent-purple-600"
-                  />
-                </div>
-                <label htmlFor="accept-data-treatment" className="text-xs text-slate-500 font-semibold leading-relaxed cursor-pointer select-none">
-                  Acepto el <strong className="font-bold text-slate-700">Tratamiento y Lectura de Datos Personales</strong> (Habeas Data) conforme a la Ley 1581 de Protección de Datos. Autorizo a CrediULEP para la consulta y reporte de mis obligaciones.
-                </label>
-              </div>
+                  <div className="space-y-1">
+                    <label className="text-[11px] font-bold text-slate-500 tracking-wider uppercase flex items-center gap-1.5">
+                      <Shield className="w-3.5 h-3.5 text-purple-600" />
+                      Cédula de Ciudadanía *
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="Ej: 1020304050"
+                      value={regCedula}
+                      onChange={(e) => setRegCedula(e.target.value)}
+                      disabled={isLoading}
+                      className="w-full bg-slate-50 border border-slate-200 focus:border-purple-500 focus:bg-white focus:ring-4 focus:ring-purple-500/10 rounded-2xl py-2.5 px-4 text-slate-800 placeholder-slate-400 font-semibold transition-all outline-none text-sm"
+                    />
+                  </div>
 
-              {/* Error message */}
-              <AnimatePresence mode="wait">
-                {error && (
-                  <motion.div
-                    initial={{ opacity: 0, y: -10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: -10 }}
-                    className="bg-red-50 border border-red-200 text-red-800 rounded-2xl p-4 flex items-start gap-3"
-                    id="login-error-alert"
-                  >
-                    <AlertCircle className="w-5 h-5 text-red-500 shrink-0 mt-0.5" />
-                    <div className="text-sm font-semibold">
-                      <span className="font-bold text-red-600">Error:</span> {error}
+                  <div className="space-y-1">
+                    <label className="text-[11px] font-bold text-slate-500 tracking-wider uppercase flex items-center gap-1.5">
+                      <Phone className="w-3.5 h-3.5 text-purple-600" />
+                      Celular de Contacto *
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="Ej: 3001234567"
+                      value={regCelular}
+                      onChange={(e) => setRegCelular(e.target.value)}
+                      disabled={isLoading}
+                      className="w-full bg-slate-50 border border-slate-200 focus:border-purple-500 focus:bg-white focus:ring-4 focus:ring-purple-500/10 rounded-2xl py-2.5 px-4 text-slate-800 placeholder-slate-400 font-semibold transition-all outline-none text-sm"
+                    />
+                  </div>
+
+                  {/* Personal Data Treatment Acceptance */}
+                  <div className="flex items-start gap-3 bg-purple-50/20 hover:bg-purple-50/30 border border-purple-100/40 p-3 rounded-2xl transition-all">
+                    <div className="flex items-center mt-0.5 shrink-0">
+                      <input
+                        type="checkbox"
+                        id="accept-data-treatment-reg"
+                        checked={regAcceptDataTreatment}
+                        onChange={(e) => setRegAcceptDataTreatment(e.target.checked)}
+                        disabled={isLoading}
+                        className="w-4 h-4 text-purple-600 bg-white border-purple-200 rounded focus:ring-purple-500 cursor-pointer accent-purple-600"
+                      />
                     </div>
-                  </motion.div>
-                )}
-              </AnimatePresence>
+                    <label htmlFor="accept-data-treatment-reg" className="text-[11px] text-slate-500 font-semibold leading-relaxed cursor-pointer select-none">
+                      Autorizo el tratamiento de mis datos personales de acuerdo con la Ley de Habeas Data para realizar mi solicitud de registro y estudio de crédito.
+                    </label>
+                  </div>
 
-              {/* Submit button */}
-              <motion.button
-                type="submit"
-                disabled={isLoading}
-                whileHover={{ scale: 1.01 }}
-                whileTap={{ scale: 0.99 }}
-                className="w-full bg-gradient-to-r from-purple-600 to-purple-700 hover:from-purple-500 hover:to-purple-600 active:from-purple-700 active:to-purple-800 disabled:from-slate-300 disabled:to-slate-400 text-white font-bold py-3.5 rounded-2xl shadow-lg shadow-purple-600/10 transition-all duration-300 flex items-center justify-center gap-2 cursor-pointer mt-2"
-                id="login-submit-btn"
-              >
-                {isLoading ? (
-                  <svg className="animate-spin h-5 w-5 text-white" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                  </svg>
-                ) : (
-                  <>
-                    <LogIn className="w-5 h-5 text-white/90" />
-                    <span>Ingresar de forma Segura</span>
-                  </>
-                )}
-              </motion.button>
-            </form>
+                  {/* Error message */}
+                  <AnimatePresence mode="wait">
+                    {error && (
+                      <motion.div
+                        initial={{ opacity: 0, y: -10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: -10 }}
+                        className="bg-red-50 border border-red-200 text-red-800 rounded-2xl p-3 flex items-start gap-2.5"
+                      >
+                        <AlertCircle className="w-4.5 h-4.5 text-red-500 shrink-0 mt-0.5" />
+                        <div className="text-xs font-semibold">
+                          <span className="font-bold text-red-600">Error:</span> {error}
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+
+                  {/* WhatsApp redirection submit button */}
+                  <motion.button
+                    type="submit"
+                    disabled={isLoading}
+                    whileHover={{ scale: 1.01 }}
+                    whileTap={{ scale: 0.99 }}
+                    className="w-full bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 active:from-emerald-700 active:to-teal-800 disabled:from-slate-300 disabled:to-slate-400 text-white font-bold py-3 rounded-2xl shadow-lg shadow-emerald-600/10 transition-all duration-300 flex items-center justify-center gap-2 cursor-pointer mt-1 text-sm"
+                  >
+                    {isLoading ? (
+                      <svg className="animate-spin h-5 w-5 text-white" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                      </svg>
+                    ) : (
+                      <>
+                        <svg className="w-5 h-5 fill-current" viewBox="0 0 24 24">
+                          <path d="M.057 24l1.687-6.163c-1.041-1.804-1.588-3.849-1.587-5.946C.06 5.348 5.397.01 12.008.01c3.202.001 6.212 1.246 8.477 3.514 2.266 2.268 3.507 5.28 3.505 8.484-.004 6.657-5.34 11.997-11.953 11.997-2.005-.001-3.973-.502-5.734-1.455L0 24zm6.59-4.846c1.6.95 3.188 1.449 4.825 1.451 5.436 0 9.86-4.37 9.864-9.799.002-2.63-1.023-5.101-2.885-6.965C16.528 2.025 14.072.996 11.45 1.016 6.012 1.016 1.59 5.385 1.586 10.814c-.001 1.695.452 3.354 1.311 4.816l-.98 3.577 3.72-.963z"/>
+                        </svg>
+                        <span>Enviar Solicitud a WhatsApp</span>
+                      </>
+                    )}
+                  </motion.button>
+                </motion.form>
+              )}
+            </AnimatePresence>
           </div>
 
           {/* Security and Access Disclaimer */}

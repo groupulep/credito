@@ -18,6 +18,7 @@ import {
   AlertTriangle,
   Clock,
   MessageCircle,
+  Bell,
   LogOut,
   ChevronLeft,
   ChevronRight,
@@ -45,6 +46,7 @@ import {
 import * as XLSX from 'xlsx';
 import { Client, Loan, Installment } from '../types';
 import { generateAmortizationSchedule, formatCurrency, saveDatabase } from '../utils';
+import { sendPushNotification } from '../App';
 import {
   ResponsiveContainer,
   PieChart,
@@ -78,7 +80,14 @@ export default function AdminDashboard({
     }
     return false;
   });
-  const [activeTab, setActiveTab] = useState<'kpis' | 'management' | 'calendar'>('kpis');
+  const [activeTab, setActiveTab] = useState<'kpis' | 'management' | 'calendar' | 'notifications'>('kpis');
+
+  // Notification panel states
+  const [notifTitle, setNotifTitle] = useState('');
+  const [notifBody, setNotifBody] = useState('');
+  const [notifTarget, setNotifTarget] = useState<'all' | 'vigente' | 'atrasado' | 'specific'>('all');
+  const [notifTargetCedula, setNotifTargetCedula] = useState('');
+  const [notifSuccessMessage, setNotifSuccessMessage] = useState('');
 
   // House Clean / Limpiar Casa states
   const [selectiveWipeSelected, setSelectiveWipeSelected] = useState<string[]>([]);
@@ -606,6 +615,34 @@ export default function AdminDashboard({
     triggerAlert('success', 'Pago de cuota registrado exitosamente.');
   };
 
+  const handleSendAdminMessage = (cedula: string, texto: string) => {
+    const updatedClients = clients.map((client) => {
+      if (client.cedula !== cedula) return client;
+      
+      const currentMsgs = client.mensajes || [];
+      const newMsg = {
+        id: Math.random().toString(36).substring(2, 9),
+        remitente: 'admin' as const,
+        texto: texto.trim(),
+        fecha: new Date().toISOString()
+      };
+      
+      return {
+        ...client,
+        mensajes: [...currentMsgs, newMsg]
+      };
+    });
+    
+    setClients(updatedClients);
+    saveDatabase(updatedClients);
+    
+    // Update active modal client if open
+    if (selectedClient && selectedClient.cedula === cedula) {
+      const updatedSelected = updatedClients.find(c => c.cedula === cedula);
+      if (updatedSelected) setSelectedClient(updatedSelected);
+    }
+  };
+
   // Export database to Excel file
   const handleExportToExcel = () => {
     try {
@@ -643,6 +680,8 @@ export default function AdminDashboard({
           'Teléfono / WhatsApp': client.telefono,
           'Dirección': client.direccion,
           'Contraseña de Acceso': client.contrasena || client.cedula,
+          'Banco / Entidad': client.banco || '',
+          'Número de Cuenta': client.numeroCuenta || '',
           'Tiene Crédito Activo': p ? 'SÍ' : 'NO',
           'ID Crédito': p ? p.id : 'N/A',
           'Monto Préstamo': p ? p.montoOriginal : 0,
@@ -686,16 +725,35 @@ export default function AdminDashboard({
               'Fecha de Vencimiento': cuota.fechaVencimiento,
               'Estado de Pago': cuota.pagado ? 'Pagada' : 'Pendiente',
               'Fecha de Pago': cuota.fechaPago || 'N/A',
+              'ID Cuota': cuota.id,
             });
           });
         }
       });
 
-      // 3. Create Workbook and Sheets
+      // 3. Prepare Sheet 3: Mensajes de Soporte
+      const messageRows: any[] = [];
+      clients.forEach((client) => {
+        if (client.mensajes && client.mensajes.length > 0) {
+          client.mensajes.forEach((msg) => {
+            messageRows.push({
+              'Cédula Afiliado': client.cedula,
+              'Nombre Afiliado': client.nombre,
+              'ID Mensaje': msg.id,
+              'Remitente': msg.remitente === 'admin' ? 'Administrador (admin)' : 'Socio (cliente)',
+              'Texto': msg.texto,
+              'Fecha': msg.fecha,
+            });
+          });
+        }
+      });
+
+      // 4. Create Workbook and Sheets
       const wb = XLSX.utils.book_new();
 
       const wsClients = XLSX.utils.json_to_sheet(clientRows);
       const wsInstallments = XLSX.utils.json_to_sheet(installmentRows);
+      const wsMessages = XLSX.utils.json_to_sheet(messageRows);
 
       // Add Auto-fit columns helper
       const autofitColumns = (ws: any, data: any[]) => {
@@ -716,17 +774,344 @@ export default function AdminDashboard({
 
       autofitColumns(wsClients, clientRows);
       autofitColumns(wsInstallments, installmentRows);
+      autofitColumns(wsMessages, messageRows);
 
       XLSX.utils.book_append_sheet(wb, wsClients, 'Afiliados y Créditos');
       XLSX.utils.book_append_sheet(wb, wsInstallments, 'Detalle de Cuotas');
+      XLSX.utils.book_append_sheet(wb, wsMessages, 'Mensajes de Soporte');
 
-      // 4. Trigger file download
+      // 5. Trigger file download
       XLSX.writeFile(wb, `Reporte_Cartera_CrediULEP_${new Date().toISOString().split('T')[0]}.xlsx`);
       triggerAlert('success', 'Archivo Excel generado y descargado exitosamente.');
     } catch (err) {
       console.error(err);
       triggerAlert('error', 'Ocurrió un error al generar el archivo Excel.');
     }
+  };
+
+  const handleSendNotification = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!notifTitle.trim() || !notifBody.trim()) {
+      triggerAlert('error', 'Por favor ingresa un título y el cuerpo del mensaje.');
+      return;
+    }
+
+    if (notifTarget === 'specific' && !notifTargetCedula) {
+      triggerAlert('error', 'Por favor selecciona un socio destinatario.');
+      return;
+    }
+
+    // Determine target clients
+    let targetClients: Client[] = [];
+    if (notifTarget === 'all') {
+      targetClients = clients;
+    } else if (notifTarget === 'vigente') {
+      targetClients = clients.filter(c => c.prestamo?.estado === 'vigente');
+    } else if (notifTarget === 'atrasado') {
+      targetClients = clients.filter(c => c.prestamo?.estado === 'atrasado');
+    } else if (notifTarget === 'specific') {
+      const found = clients.find(c => c.cedula === notifTargetCedula);
+      if (found) targetClients = [found];
+    }
+
+    if (targetClients.length === 0) {
+      triggerAlert('error', 'No se encontraron socios que cumplan con la condición seleccionada.');
+      return;
+    }
+
+    // Create notification item
+    const newNotif = {
+      id: `notif-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
+      titulo: notifTitle.trim(),
+      mensaje: notifBody.trim(),
+      fecha: new Date().toISOString(),
+      leido: false
+    };
+
+    // Update clients state
+    const updatedClients = clients.map(client => {
+      const isTarget = targetClients.some(tc => tc.cedula === client.cedula);
+      if (isTarget) {
+        const existingNotifs = client.notificaciones || [];
+        return {
+          ...client,
+          notificaciones: [newNotif, ...existingNotifs]
+        };
+      }
+      return client;
+    });
+
+    setClients(updatedClients);
+    saveDatabase(updatedClients);
+
+    // Trigger local push notification for immediate visual alert
+    sendPushNotification(
+      `Alerta de CrediULEP: ${notifTitle.trim()}`,
+      `Enviado a ${targetClients.length} socio(s)`
+    );
+
+    triggerAlert(
+      'success',
+      `¡Notificación enviada exitosamente a ${targetClients.length} socio(s)!`
+    );
+
+    // Clear state
+    setNotifTitle('');
+    setNotifBody('');
+    setNotifSuccessMessage(`Última enviada: "${notifTitle}" a ${targetClients.length} socio(s) el ${new Date().toLocaleTimeString()}`);
+    setTimeout(() => setNotifSuccessMessage(''), 8000);
+  };
+
+  const handleDeleteNotification = (notifId: string) => {
+    const updatedClients = clients.map(client => {
+      if (client.notificaciones) {
+        return {
+          ...client,
+          notificaciones: client.notificaciones.filter(n => n.id !== notifId)
+        };
+      }
+      return client;
+    });
+    setClients(updatedClients);
+    saveDatabase(updatedClients);
+    triggerAlert('success', 'Notificación eliminada de los registros.');
+  };
+
+  // Import database from Excel file (supports updating existing records and skipping duplicates)
+  const handleImportExcel = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const data = event.target?.result;
+        if (!data) return;
+
+        const workbook = XLSX.read(data, { type: 'binary' });
+
+        // 1. Parse Clientes/Afiliados
+        const firstSheetName = workbook.SheetNames[0];
+        const wsClients = workbook.Sheets['Afiliados y Créditos'] || workbook.Sheets[firstSheetName];
+        if (!wsClients) {
+          triggerAlert('error', 'No se encontró la hoja de Afiliados y Créditos en el archivo.');
+          return;
+        }
+        const clientRows = XLSX.utils.sheet_to_json<any>(wsClients);
+
+        // 2. Parse Cuotas
+        const wsInstallments = workbook.Sheets['Detalle de Cuotas'] || workbook.Sheets[workbook.SheetNames[1]];
+        const installmentRows = wsInstallments ? XLSX.utils.sheet_to_json<any>(wsInstallments) : [];
+
+        // 3. Parse Mensajes
+        const wsMessages = workbook.Sheets['Mensajes de Soporte'] || workbook.Sheets[workbook.SheetNames[2]];
+        const messageRows = wsMessages ? XLSX.utils.sheet_to_json<any>(wsMessages) : [];
+
+        // Rebuild clients map
+        const importedClientsMap = new Map<string, Client>();
+
+        clientRows.forEach((row: any) => {
+          const cedula = String(row['Cédula de Ciudadanía'] || row['Cédula'] || row['cedula'] || '').trim();
+          if (!cedula) return;
+
+          const nombre = String(row['Nombre Completo'] || row['Nombre'] || row['nombre'] || '').trim();
+          const correo = String(row['Correo Electrónico'] || row['Correo'] || row['correo'] || '').trim();
+          const telefono = String(row['Teléfono / WhatsApp'] || row['Teléfono'] || row['telefono'] || '').trim();
+          const direccion = String(row['Dirección'] || row['direccion'] || '').trim();
+          const contrasena = String(row['Contraseña de Acceso'] || row['Contraseña'] || row['contrasena'] || cedula).trim();
+          const banco = String(row['Banco / Entidad'] || row['banco'] || '').trim();
+          const numeroCuenta = String(row['Número de Cuenta'] || row['N° de Cuenta'] || row['numeroCuenta'] || '').trim();
+
+          const tienePrestamo = String(row['Tiene Crédito Activo'] || row['Tiene Préstamo'] || '').toUpperCase() === 'SÍ' ||
+                                String(row['Tiene Crédito Activo'] || row['Tiene Préstamo'] || '').toUpperCase() === 'SI' ||
+                                !!row['ID Crédito'] || !!row['Monto Préstamo'];
+
+          let prestamo: Loan | null = null;
+          if (tienePrestamo) {
+            const idCredito = String(row['ID Crédito'] || row['idCredito'] || `loan-${cedula}-${Date.now()}`).trim();
+            const montoOriginal = Number(row['Monto Préstamo'] || row['Monto'] || row['montoOriginal'] || 0);
+            const tasaInteresMensual = Number(row['Tasa Interés Mensual (%)'] || row['Tasa Interés Mensual'] || row['tasaInteresMensual'] || 0);
+            const plazoMeses = Number(row['Plazo (Meses)'] || row['Plazo'] || row['plazoMeses'] || 0);
+            const fechaInicio = String(row['Fecha de Inicio'] || row['fechaInicio'] || new Date().toISOString().split('T')[0]).trim();
+            
+            let estado: 'vigente' | 'atrasado' | 'cancelado' = 'vigente';
+            const rowEstado = String(row['Estado Crédito'] || row['Estado'] || row['estado'] || '').toLowerCase();
+            if (rowEstado.includes('atrasado') || rowEstado.includes('mora') || rowEstado.includes('demorado')) {
+              estado = 'atrasado';
+            } else if (rowEstado.includes('cancelado') || rowEstado.includes('pagado')) {
+              estado = 'cancelado';
+            }
+
+            prestamo = {
+               id: idCredito,
+               montoOriginal,
+               tasaInteresMensual,
+               plazoMeses,
+               fechaInicio,
+               estado,
+               cuotas: []
+            };
+          }
+
+          importedClientsMap.set(cedula, {
+            cedula,
+            contrasena,
+            nombre,
+            correo,
+            telefono,
+            direccion,
+            prestamo,
+            banco: banco || undefined,
+            numeroCuenta: numeroCuenta || undefined,
+            mensajes: []
+          });
+        });
+
+        // Associate cuotas/installments
+        installmentRows.forEach((row: any) => {
+          const cedula = String(row['Cédula Afiliado'] || row['Cédula de Ciudadanía'] || row['Cédula'] || row['cedula'] || '').trim();
+          if (!cedula) return;
+
+          const client = importedClientsMap.get(cedula);
+          if (client && client.prestamo) {
+            const numero = Number(row['Número de Cuota'] || row['Cuota'] || row['numero'] || 0);
+            const montoTotal = Number(row['Monto de Cuota'] || row['Monto'] || row['montoTotal'] || 0);
+            const capital = Number(row['Abono a Capital'] || row['Capital'] || row['capital'] || 0);
+            const interes = Number(row['Interés de Cuota'] || row['Interés'] || row['interes'] || 0);
+            const saldoRestante = Number(row['Saldo Restante'] || row['saldoRestante'] || 0);
+            const fechaVencimiento = String(row['Fecha de Vencimiento'] || row['fechaVencimiento'] || '').trim();
+            const pagadoStr = String(row['Estado de Pago'] || row['pagado'] || '').toLowerCase();
+            const pagado = pagadoStr.includes('pagada') || pagadoStr.includes('sí') || pagadoStr.includes('si') || pagadoStr === 'true' || pagadoStr === '1';
+            const fechaPagoRaw = row['Fecha de Pago'] || row['fechaPago'];
+            const fechaPago = (fechaPagoRaw && fechaPagoRaw !== 'N/A') ? String(fechaPagoRaw).trim() : null;
+
+            const idCuota = String(row['ID Cuota'] || row['id'] || `${cedula}-cuota-${numero}`);
+
+            const installment: Installment = {
+              id: idCuota,
+              numero,
+              montoTotal,
+              capital,
+              interes,
+              saldoRestante,
+              fechaVencimiento,
+              pagado,
+              fechaPago
+            };
+
+            const existingCuotaIdx = client.prestamo.cuotas.findIndex(c => c.numero === numero);
+            if (existingCuotaIdx > -1) {
+              client.prestamo.cuotas[existingCuotaIdx] = installment;
+            } else {
+              client.prestamo.cuotas.push(installment);
+            }
+          }
+        });
+
+        // Associate messages
+        messageRows.forEach((row: any) => {
+          const cedula = String(row['Cédula Afiliado'] || row['Cédula'] || row['cedula'] || '').trim();
+          if (!cedula) return;
+
+          const client = importedClientsMap.get(cedula);
+          if (client) {
+            const senderRaw = String(row['Remitente'] || row['remitente'] || '').toLowerCase();
+            const remitente: 'admin' | 'cliente' = (senderRaw.includes('admin') || senderRaw.includes('administrador')) ? 'admin' : 'cliente';
+            const texto = String(row['Texto'] || row['texto'] || row['Mensaje'] || '').trim();
+            const fecha = String(row['Fecha'] || row['fecha'] || new Date().toISOString()).trim();
+            const id = String(row['ID Mensaje'] || row['id'] || Math.random().toString(36).substring(2, 9));
+
+            if (texto) {
+              if (!client.mensajes) client.mensajes = [];
+              client.mensajes.push({
+                id,
+                remitente,
+                texto,
+                fecha
+              });
+            }
+          }
+        });
+
+        // Sort installments and messages by date/number
+        importedClientsMap.forEach((client) => {
+          if (client.prestamo && client.prestamo.cuotas.length > 0) {
+            client.prestamo.cuotas.sort((a, b) => a.numero - b.numero);
+          }
+          if (client.mensajes && client.mensajes.length > 0) {
+            client.mensajes.sort((a, b) => new Date(a.fecha).getTime() - new Date(b.fecha).getTime());
+          }
+        });
+
+        // Merge with existing clients
+        const currentClients = [...clients];
+        let addedCount = 0;
+        let updatedCount = 0;
+
+        importedClientsMap.forEach((importedClient, cedula) => {
+          const existingIndex = currentClients.findIndex(c => c.cedula === cedula);
+          if (existingIndex > -1) {
+            const existing = currentClients[existingIndex];
+            
+            let updatedPrestamo = null;
+            if (importedClient.prestamo) {
+              // Merge installments if necessary
+              const mergedCuotas = [...(existing.prestamo?.cuotas || [])];
+              importedClient.prestamo.cuotas.forEach(newCuota => {
+                const idx = mergedCuotas.findIndex(c => c.numero === newCuota.numero);
+                if (idx > -1) {
+                  mergedCuotas[idx] = newCuota;
+                } else {
+                  mergedCuotas.push(newCuota);
+                }
+              });
+              
+              updatedPrestamo = {
+                ...importedClient.prestamo,
+                cuotas: mergedCuotas.sort((a, b) => a.numero - b.numero)
+              };
+            } else if (existing.prestamo) {
+              updatedPrestamo = existing.prestamo;
+            }
+
+            const mergedMessages = [...(existing.mensajes || [])];
+            (importedClient.mensajes || []).forEach(newMsg => {
+              const exists = mergedMessages.some(m => m.id === newMsg.id || (m.texto === newMsg.texto && m.fecha === newMsg.fecha));
+              if (!exists) {
+                mergedMessages.push(newMsg);
+              }
+            });
+
+            currentClients[existingIndex] = {
+              ...existing,
+              nombre: importedClient.nombre || existing.nombre,
+              correo: importedClient.correo || existing.correo,
+              telefono: importedClient.telefono || existing.telefono,
+              direccion: importedClient.direccion || existing.direccion,
+              contrasena: importedClient.contrasena || existing.contrasena,
+              banco: importedClient.banco || existing.banco,
+              numeroCuenta: importedClient.numeroCuenta || existing.numeroCuenta,
+              prestamo: updatedPrestamo,
+              mensajes: mergedMessages.sort((a, b) => new Date(a.fecha).getTime() - new Date(b.fecha).getTime())
+            };
+            updatedCount++;
+          } else {
+            currentClients.push(importedClient);
+            addedCount++;
+          }
+        });
+
+        setClients(currentClients);
+        saveDatabase(currentClients);
+        triggerAlert('success', `Importación completa: ${addedCount} nuevos afiliados creados, ${updatedCount} afiliados existentes actualizados.`);
+      } catch (err) {
+        console.error(err);
+        triggerAlert('error', 'Error al procesar el archivo Excel. Asegúrate de usar un formato válido.');
+      }
+    };
+
+    reader.readAsBinaryString(file);
+    e.target.value = '';
   };
 
   const downloadExcelForWipedClients = (wiped: Client[], reason: string) => {
@@ -1019,6 +1404,18 @@ export default function AdminDashboard({
               <Calendar className={`w-5 h-5 shrink-0 ${activeTab === 'calendar' ? 'text-purple-600' : 'text-slate-400'}`} />
               {sidebarOpen && <span className="tracking-tight">Calendario de Pagos</span>}
             </button>
+
+            <button
+              onClick={() => setActiveTab('notifications')}
+              className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all font-semibold text-sm cursor-pointer ${
+                activeTab === 'notifications'
+                  ? 'bg-purple-50 text-purple-700 border border-purple-100 shadow-sm'
+                  : 'text-slate-500 hover:text-purple-700 hover:bg-purple-50/50 border border-transparent'
+              }`}
+            >
+              <Bell className={`w-5 h-5 shrink-0 ${activeTab === 'notifications' ? 'text-purple-600' : 'text-slate-400'}`} />
+              {sidebarOpen && <span className="tracking-tight">Notificaciones</span>}
+            </button>
           </nav>
 
           {/* Floating Mascot Identity */}
@@ -1123,7 +1520,13 @@ export default function AdminDashboard({
               <Menu className="w-5 h-5" />
             </button>
             <h2 className="text-xl font-bold text-slate-900 tracking-tight">
-              {activeTab === 'kpis' ? 'Indicadores de Cartera' : activeTab === 'management' ? 'Gestión de Cartera' : 'Calendario de Pagos y Deudas'}
+              {activeTab === 'kpis'
+                ? 'Indicadores de Cartera'
+                : activeTab === 'management'
+                ? 'Gestión de Cartera'
+                : activeTab === 'calendar'
+                ? 'Calendario de Pagos y Deudas'
+                : 'Notificaciones Masivas y Personalizadas'}
             </h2>
             <div className="flex items-center pl-1 shrink-0" id="db-connection-status-wrapper">
               <span className="relative flex h-2.5 w-2.5" title={syncError ? 'Base de datos offline' : 'Base de datos conectada'}>
@@ -1503,6 +1906,48 @@ export default function AdminDashboard({
         {/* -------------------- SECTION B: Gestión de Clientes -------------------- */}
         {activeTab === 'management' && (
           <div className="space-y-6" id="management-section">
+            {/* Excel Data Sync Actions Bar */}
+            <div className="bg-white border border-slate-100 p-4 md:p-5 rounded-3xl shadow-sm flex flex-col md:flex-row items-center justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 bg-emerald-50 text-emerald-600 rounded-2xl border border-emerald-100/50">
+                  <FileSpreadsheet className="w-5 h-5" />
+                </div>
+                <div>
+                  <h4 className="text-sm font-extrabold text-slate-900 tracking-tight">Sincronización Masiva de Datos</h4>
+                  <p className="text-xs text-slate-500">Carga un archivo Excel para registrar o actualizar afiliados y créditos, o descarga el informe actual.</p>
+                </div>
+              </div>
+              
+              <div className="flex flex-wrap items-center gap-3 w-full md:w-auto justify-end">
+                {/* Hidden file input for Excel import */}
+                <input
+                  type="file"
+                  id="excel-import-input"
+                  accept=".xlsx, .xls"
+                  onChange={handleImportExcel}
+                  className="hidden"
+                />
+                <button
+                  type="button"
+                  onClick={() => document.getElementById('excel-import-input')?.click()}
+                  className="bg-purple-600 hover:bg-purple-700 text-white font-bold px-4 py-2.5 rounded-xl shadow-md shadow-purple-600/10 transition-all flex items-center gap-2 text-xs cursor-pointer active:scale-[0.98]"
+                  title="Cargar archivo Excel para importar o actualizar afiliados, créditos y cuotas"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>Importar Excel</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleExportToExcel}
+                  className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-4 py-2.5 rounded-xl shadow-md shadow-emerald-600/10 transition-all flex items-center gap-2 text-xs cursor-pointer active:scale-[0.98]"
+                  title="Descargar base de datos actual en archivo Excel (.xlsx)"
+                >
+                  <FileSpreadsheet className="w-4 h-4" />
+                  <span>Exportar Excel</span>
+                </button>
+              </div>
+            </div>
+
             {/* Real-time search tools & filters */}
             <div className="bg-white border border-slate-100 p-4 md:p-5 rounded-3xl shadow-sm flex flex-col sm:flex-row items-center justify-between gap-4">
               {/* Search Bar */}
@@ -2339,6 +2784,368 @@ export default function AdminDashboard({
                           </div>
                         );
                       })
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
+
+        {/* -------------------- SECTION D: Notificaciones -------------------- */}
+        {activeTab === 'notifications' && (() => {
+          // Compute audiences
+          const totalAffiliates = clients.length;
+          const vigentesCount = clients.filter(c => c.prestamo?.estado === 'vigente').length;
+          const atrasadosCount = clients.filter(c => c.prestamo?.estado === 'atrasado').length;
+          const noLoanCount = clients.filter(c => !c.prestamo).length;
+
+          // Compute sent notifications history
+          const sentNotificationsHistory: { id: string; titulo: string; mensaje: string; fecha: string; count: number; target: string }[] = [];
+          const seenIds = new Set<string>();
+          clients.forEach(c => {
+            if (c.notificaciones) {
+              c.notificaciones.forEach(n => {
+                if (!seenIds.has(n.id)) {
+                  seenIds.add(n.id);
+                  const recipientCount = clients.filter(other => 
+                    other.notificaciones?.some(otherN => otherN.id === n.id)
+                  ).length;
+                  
+                  let targetDesc = 'Socio específico';
+                  if (recipientCount === clients.length) {
+                    targetDesc = 'Todos los afiliados';
+                  } else if (recipientCount === vigentesCount && vigentesCount > 0) {
+                    targetDesc = 'Socio(s) al día';
+                  } else if (recipientCount === atrasadosCount && atrasadosCount > 0) {
+                    targetDesc = 'Socio(s) en mora';
+                  } else if (recipientCount === noLoanCount && noLoanCount > 0) {
+                    targetDesc = 'Socio(s) sin crédito';
+                  }
+
+                  sentNotificationsHistory.push({
+                    id: n.id,
+                    titulo: n.titulo,
+                    mensaje: n.mensaje,
+                    fecha: n.fecha,
+                    count: recipientCount,
+                    target: targetDesc
+                  });
+                }
+              });
+            }
+          });
+          sentNotificationsHistory.sort((a, b) => new Date(b.fecha).getTime() - new Date(a.fecha).getTime());
+
+          return (
+            <div className="space-y-6" id="notifications-section">
+              {/* Stats overview banner */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                <div className="bg-white p-5 rounded-3xl border border-slate-100 flex items-center justify-between shadow-sm hover:shadow-md transition-shadow">
+                  <div className="flex items-center gap-3">
+                    <div className="p-3 bg-blue-50 text-blue-600 rounded-2xl">
+                      <Users className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <span className="text-xs text-slate-400 font-bold uppercase tracking-wider block">Total Socios</span>
+                      <span className="text-lg font-extrabold text-slate-800">{totalAffiliates}</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="bg-white p-5 rounded-3xl border border-slate-100 flex items-center justify-between shadow-sm hover:shadow-md transition-shadow">
+                  <div className="flex items-center gap-3">
+                    <div className="p-3 bg-emerald-50 text-emerald-600 rounded-2xl">
+                      <CheckCircle2 className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <span className="text-xs text-slate-400 font-bold uppercase tracking-wider block">Al Día (Vigentes)</span>
+                      <span className="text-lg font-extrabold text-emerald-600">{vigentesCount}</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="bg-white p-5 rounded-3xl border border-slate-100 flex items-center justify-between shadow-sm hover:shadow-md transition-shadow">
+                  <div className="flex items-center gap-3">
+                    <div className="p-3 bg-rose-50 text-rose-600 rounded-2xl">
+                      <AlertTriangle className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <span className="text-xs text-slate-400 font-bold uppercase tracking-wider block">En Mora (Atrasados)</span>
+                      <span className="text-lg font-extrabold text-rose-600">{atrasadosCount}</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="bg-white p-5 rounded-3xl border border-slate-100 flex items-center justify-between shadow-sm hover:shadow-md transition-shadow">
+                  <div className="flex items-center gap-3">
+                    <div className="p-3 bg-slate-50 text-slate-600 rounded-2xl">
+                      <Clock className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <span className="text-xs text-slate-400 font-bold uppercase tracking-wider block">Sin Crédito Activo</span>
+                      <span className="text-lg font-extrabold text-slate-600">{noLoanCount}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Main row */}
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+                {/* Compose Form (7 cols) */}
+                <div className="lg:col-span-7 bg-white p-6 md:p-8 rounded-3xl border border-slate-100 shadow-sm space-y-6">
+                  <div className="flex items-center gap-3 pb-3 border-b border-slate-100">
+                    <div className="p-2.5 bg-purple-50 text-purple-600 rounded-2xl border border-purple-100/50">
+                      <Bell className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <h3 className="text-lg font-extrabold text-slate-900 tracking-tight">Redactar Nueva Notificación</h3>
+                      <p className="text-xs text-slate-500">Envía alertas instantáneas a tus afiliados de acuerdo a su estado de cuenta</p>
+                    </div>
+                  </div>
+
+                  {notifSuccessMessage && (
+                    <motion.div
+                      initial={{ opacity: 0, y: -10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      className="p-3 bg-emerald-50 border border-emerald-100 rounded-xl text-emerald-800 text-xs font-bold"
+                    >
+                      {notifSuccessMessage}
+                    </motion.div>
+                  )}
+
+                  <form onSubmit={handleSendNotification} className="space-y-5">
+                    {/* Destination Selection Cards */}
+                    <div className="space-y-2">
+                      <label className="text-xs font-black text-slate-700 uppercase tracking-wider block">Destinatarios / Audiencia</label>
+                      <div className="grid grid-cols-2 gap-3">
+                        <button
+                          type="button"
+                          onClick={() => { setNotifTarget('all'); setNotifTargetCedula(''); }}
+                          className={`p-4 rounded-2xl border text-left flex flex-col justify-between h-24 transition-all cursor-pointer ${
+                            notifTarget === 'all'
+                              ? 'border-purple-500 bg-purple-50/40 shadow-sm'
+                              : 'border-slate-100 bg-slate-50 hover:bg-slate-100/50'
+                          }`}
+                        >
+                          <Users className={`w-5 h-5 ${notifTarget === 'all' ? 'text-purple-600' : 'text-slate-400'}`} />
+                          <div>
+                            <span className="text-xs font-extrabold text-slate-800 block">Todos</span>
+                            <span className="text-[10px] text-slate-500">{totalAffiliates} afiliados</span>
+                          </div>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => { setNotifTarget('atrasado'); setNotifTargetCedula(''); }}
+                          className={`p-4 rounded-2xl border text-left flex flex-col justify-between h-24 transition-all cursor-pointer ${
+                            notifTarget === 'atrasado'
+                              ? 'border-rose-500 bg-rose-50/40 shadow-sm'
+                              : 'border-slate-100 bg-slate-50 hover:bg-slate-100/50'
+                          }`}
+                        >
+                          <AlertTriangle className={`w-5 h-5 ${notifTarget === 'atrasado' ? 'text-rose-600' : 'text-slate-400'}`} />
+                          <div>
+                            <span className="text-xs font-extrabold text-slate-800 block">En Mora (Deben)</span>
+                            <span className="text-[10px] text-slate-500">{atrasadosCount} afiliados</span>
+                          </div>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => { setNotifTarget('vigente'); setNotifTargetCedula(''); }}
+                          className={`p-4 rounded-2xl border text-left flex flex-col justify-between h-24 transition-all cursor-pointer ${
+                            notifTarget === 'vigente'
+                              ? 'border-emerald-500 bg-emerald-50/40 shadow-sm'
+                              : 'border-slate-100 bg-slate-50 hover:bg-slate-100/50'
+                          }`}
+                        >
+                          <CheckCircle2 className={`w-5 h-5 ${notifTarget === 'vigente' ? 'text-emerald-600' : 'text-slate-400'}`} />
+                          <div>
+                            <span className="text-xs font-extrabold text-slate-800 block">Al Día (Vigentes)</span>
+                            <span className="text-[10px] text-slate-500">{vigentesCount} afiliados</span>
+                          </div>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => setNotifTarget('specific')}
+                          className={`p-4 rounded-2xl border text-left flex flex-col justify-between h-24 transition-all cursor-pointer ${
+                            notifTarget === 'specific'
+                              ? 'border-indigo-500 bg-indigo-50/40 shadow-sm'
+                              : 'border-slate-100 bg-slate-50 hover:bg-slate-100/50'
+                          }`}
+                        >
+                          <Mail className={`w-5 h-5 ${notifTarget === 'specific' ? 'text-indigo-600' : 'text-slate-400'}`} />
+                          <div>
+                            <span className="text-xs font-extrabold text-slate-800 block">Socio Específico</span>
+                            <span className="text-[10px] text-slate-500">Elegir un afiliado</span>
+                          </div>
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Specific client dropdown selection */}
+                    <AnimatePresence>
+                      {notifTarget === 'specific' && (
+                        <motion.div
+                          initial={{ opacity: 0, height: 0 }}
+                          animate={{ opacity: 1, height: 'auto' }}
+                          exit={{ opacity: 0, height: 0 }}
+                          className="space-y-2 overflow-hidden"
+                        >
+                          <label className="text-xs font-black text-slate-700 uppercase tracking-wider block">Seleccionar Socio Destinatario</label>
+                          <select
+                            value={notifTargetCedula}
+                            onChange={(e) => setNotifTargetCedula(e.target.value)}
+                            className="w-full bg-slate-50 hover:bg-slate-100/50 focus:bg-white border border-slate-200 focus:border-purple-500 focus:ring-1 focus:ring-purple-500 rounded-2xl px-4 py-3 text-xs outline-none transition-all"
+                          >
+                            <option value="">-- Selecciona un Socio --</option>
+                            {clients.map(c => {
+                              const stateLabel = c.prestamo 
+                                ? c.prestamo.estado === 'atrasado' 
+                                  ? ' (EN MORA)' 
+                                  : ' (AL DÍA)' 
+                                : ' (SIN CRÉDITO)';
+                              return (
+                                <option key={c.cedula} value={c.cedula}>
+                                  {c.nombre} - CC {c.cedula}{stateLabel}
+                                </option>
+                              );
+                            })}
+                          </select>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+
+                    {/* Title Input */}
+                    <div className="space-y-2">
+                      <label className="text-xs font-black text-slate-700 uppercase tracking-wider block">Título / Asunto</label>
+                      <input
+                        type="text"
+                        placeholder="Ej: Recordatorio de Próxima Cuota"
+                        value={notifTitle}
+                        onChange={(e) => setNotifTitle(e.target.value)}
+                        className="w-full bg-slate-50 hover:bg-slate-100/50 focus:bg-white border border-slate-200 focus:border-purple-500 focus:ring-1 focus:ring-purple-500 rounded-2xl px-4 py-3.5 text-xs outline-none transition-all font-medium placeholder-slate-400"
+                      />
+                    </div>
+
+                    {/* Template shortcuts */}
+                    <div className="space-y-2">
+                      <label className="text-xs font-black text-slate-400 uppercase tracking-wider block">Plantillas Rápidas</label>
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setNotifTitle('Recordatorio de Pago de Cuota - CrediULEP');
+                            setNotifBody('Estimado socio, le recordamos que la fecha de vencimiento de su próxima cuota está cerca. Le agradecemos realizar su pago a tiempo para mantener su excelente historial crediticio. ¡Muchas gracias!');
+                          }}
+                          className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-[10px] font-bold rounded-lg transition-colors cursor-pointer"
+                        >
+                          📝 Próximo Pago
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setNotifTitle('ALERTA DE MORA: Cuota Vencida - CrediULEP');
+                            setNotifBody('Estimado socio, detectamos que presenta una o más cuotas en mora. Le solicitamos ponerse en contacto urgente con la administración para regularizar su situación y evitar cargos adicionales o reportes.');
+                          }}
+                          className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-[10px] font-bold rounded-lg transition-colors cursor-pointer"
+                        >
+                          📝 Cuota en Mora
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setNotifTitle('¡Felicitaciones por estar al día! 🌟');
+                            setNotifBody('Estimado socio, queremos agradecerle su compromiso y puntualidad en el pago de sus cuotas. Su excelente comportamiento de pago fortalece nuestro fondo y le abre las puertas a futuros créditos.');
+                          }}
+                          className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-[10px] font-bold rounded-lg transition-colors cursor-pointer"
+                        >
+                          📝 Felicitación
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Body textarea */}
+                    <div className="space-y-2">
+                      <label className="text-xs font-black text-slate-700 uppercase tracking-wider block">Mensaje / Cuerpo del Comunicado</label>
+                      <textarea
+                        rows={4}
+                        placeholder="Escribe el mensaje que recibirá el socio en su panel de notificaciones y vía push..."
+                        value={notifBody}
+                        onChange={(e) => setNotifBody(e.target.value)}
+                        className="w-full bg-slate-50 hover:bg-slate-100/50 focus:bg-white border border-slate-200 focus:border-purple-500 focus:ring-1 focus:ring-purple-500 rounded-2xl px-4 py-3.5 text-xs outline-none transition-all font-medium placeholder-slate-400 leading-relaxed resize-none"
+                      />
+                    </div>
+
+                    <button
+                      type="submit"
+                      disabled={!notifTitle.trim() || !notifBody.trim()}
+                      className="w-full bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white font-bold py-3.5 rounded-2xl shadow-lg shadow-purple-500/10 active:scale-[0.99] transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed text-xs flex items-center justify-center gap-2 mt-4"
+                    >
+                      <Send className="w-4 h-4" />
+                      <span>Enviar Alerta de Notificación</span>
+                    </button>
+                  </form>
+                </div>
+
+                {/* Sent history log (5 cols) */}
+                <div className="lg:col-span-5 bg-white p-6 rounded-3xl border border-slate-100 shadow-sm flex flex-col h-[650px]">
+                  <div className="flex items-center gap-3 pb-3 border-b border-slate-100 mb-4">
+                    <div className="p-2 bg-slate-50 text-slate-600 rounded-xl">
+                      <Clock className="w-4.5 h-4.5" />
+                    </div>
+                    <div>
+                      <h4 className="text-sm font-extrabold text-slate-900 tracking-tight">Historial de Envío</h4>
+                      <p className="text-[11px] text-slate-500">Comunicados emitidos recientemente</p>
+                    </div>
+                  </div>
+
+                  <div className="flex-1 overflow-y-auto space-y-3.5 pr-1 min-h-0">
+                    {sentNotificationsHistory.length === 0 ? (
+                      <div className="h-full flex flex-col items-center justify-center text-center p-6 text-slate-400 italic">
+                        <Bell className="w-10 h-10 text-slate-200 mb-2 stroke-1" />
+                        <p className="text-xs font-semibold">No hay notificaciones enviadas.</p>
+                        <p className="text-[10px] text-slate-400 mt-0.5">Las alertas masivas que envíes se registrarán aquí.</p>
+                      </div>
+                    ) : (
+                      sentNotificationsHistory.map((notif) => (
+                        <div
+                          key={notif.id}
+                          className="p-4 rounded-2xl border border-slate-100 bg-slate-50 hover:bg-slate-100/30 transition-colors flex flex-col gap-2 relative group"
+                        >
+                          <button
+                            onClick={() => handleDeleteNotification(notif.id)}
+                            className="absolute top-3 right-3 p-1 bg-white hover:bg-rose-50 text-slate-300 hover:text-rose-600 border border-slate-100 rounded-lg transition-colors cursor-pointer opacity-0 group-hover:opacity-100"
+                            title="Eliminar notificación de los registros"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+
+                          <div className="flex items-start justify-between pr-6">
+                            <span className="text-[9px] font-black text-slate-400 font-mono">
+                              {new Date(notif.fecha).toLocaleDateString()} {new Date(notif.fecha).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                            </span>
+                            <span className={`text-[9px] font-black uppercase px-2 py-0.5 rounded-md ${
+                              notif.target.includes('mora')
+                                ? 'bg-rose-50 text-rose-700 border border-rose-100'
+                                : notif.target.includes('día')
+                                ? 'bg-emerald-50 text-emerald-700 border border-emerald-100'
+                                : notif.target.includes('específico')
+                                ? 'bg-indigo-50 text-indigo-700 border border-indigo-100'
+                                : 'bg-purple-50 text-purple-700 border border-purple-100'
+                            }`}>
+                              {notif.target} ({notif.count})
+                            </span>
+                          </div>
+
+                          <div>
+                            <h5 className="text-xs font-bold text-slate-800 line-clamp-1">{notif.titulo}</h5>
+                            <p className="text-[11px] text-slate-500 font-medium mt-1 leading-relaxed line-clamp-3">{notif.mensaje}</p>
+                          </div>
+                        </div>
+                      ))
                     )}
                   </div>
                 </div>

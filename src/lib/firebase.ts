@@ -1,5 +1,5 @@
 import { initializeApp } from 'firebase/app';
-import { initializeFirestore, collection, doc, getDocs, setDoc, updateDoc, deleteDoc, writeBatch, getDocFromServer } from 'firebase/firestore';
+import { initializeFirestore, collection, doc, getDocs, setDoc, updateDoc, deleteDoc, writeBatch, getDocFromServer, onSnapshot } from 'firebase/firestore';
 import { getAuth, GoogleAuthProvider, signInWithPopup } from 'firebase/auth';
 import { Client } from '../types';
 import { PRE_SEEDED_CLIENTS } from '../utils';
@@ -143,4 +143,24 @@ export async function syncAllClientsToFirebase(clients: Client[]): Promise<void>
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, CLIENTS_COLLECTION);
   }
+}
+
+// Live real-time subscription for reactive changes (push notification triggers)
+export function subscribeToClients(onUpdate: (clients: Client[]) => void, onError: (error: Error) => void) {
+  const q = collection(db, CLIENTS_COLLECTION);
+  return onSnapshot(q, (querySnapshot) => {
+    if (querySnapshot.empty) {
+      console.log('No clients found in snapshot. Seeding default clients...');
+      seedClientsToFirebase(PRE_SEEDED_CLIENTS).catch(err => console.error('Seeding error:', err));
+      return;
+    }
+    const clientsList: Client[] = [];
+    querySnapshot.forEach((docSnap) => {
+      clientsList.push(docSnap.data() as Client);
+    });
+    onUpdate(clientsList);
+  }, (error) => {
+    console.error('Snapshot error:', error);
+    onError(error);
+  });
 }

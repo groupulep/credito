@@ -6,7 +6,7 @@
 import React, { useState, useEffect } from 'react';
 import { Client, UserSession } from './types';
 import { getDatabase, saveDatabase } from './utils';
-import { fetchClientsFromFirebase, saveClientToFirebase, deleteClientFromFirebase } from './lib/firebase';
+import { fetchClientsFromFirebase, saveClientToFirebase, deleteClientFromFirebase, subscribeToClients } from './lib/firebase';
 import CosmicBackground from './components/CosmicBackground';
 import LoginView from './components/LoginView';
 import AdminDashboard from './components/AdminDashboard';
@@ -14,35 +14,63 @@ import ClientDashboard from './components/ClientDashboard';
 import LoadingScreen from './components/LoadingScreen';
 import { MessageCircle } from 'lucide-react';
 
+// Service Worker push notification helper
+export function sendPushNotification(title: string, body: string) {
+  if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
+    navigator.serviceWorker.controller.postMessage({
+      type: 'SHOW_NOTIFICATION',
+      payload: { title, body, url: window.location.origin }
+    });
+  } else if ('Notification' in window && Notification.permission === 'granted') {
+    new Notification(title, {
+      body,
+      icon: '/logo-192.png'
+    });
+  } else {
+    console.log(`[Notification Fallback] Title: ${title}, Body: ${body}`);
+  }
+}
+
 export default function App() {
   const [clients, setClients] = useState<Client[]>([]);
   const [session, setSession] = useState<UserSession | null>(null);
   const [loading, setLoading] = useState(true);
   const [syncError, setSyncError] = useState<string | null>(null);
+  const [prevClientData, setPrevClientData] = useState<Client | null>(null);
 
-  // Initialize data on mount
+  // Initialize data and real-time subscription on mount
   useEffect(() => {
-    async function initData() {
-      // Load from local storage cache as immediate fallback
-      const cachedDb = getDatabase();
-      setClients(cachedDb);
+    // Immediate load from local storage cache
+    const cachedDb = getDatabase();
+    setClients(cachedDb);
 
-      // Fallback to Firebase Firestore
-      try {
-        const firebaseDb = await fetchClientsFromFirebase();
-        setClients(firebaseDb);
-        // Sync cache
-        saveDatabase(firebaseDb);
-        setSyncError(null);
-      } catch (error) {
-        console.error('Failed to load from Firebase. Using local cache fallback.', error);
-        setSyncError('Failed to load from Firebase');
-      } finally {
-        setLoading(false);
-      }
+    // Register Service Worker for push notifications
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('/sw.js')
+          .then((reg) => {
+            console.log('Service Worker registrado con éxito:', reg.scope);
+          })
+          .catch((err) => {
+            console.error('Error al registrar Service Worker:', err);
+          });
+      });
     }
 
-    initData();
+    // Live subscription to Firestore database
+    const unsubscribe = subscribeToClients(
+      (firebaseDb) => {
+        setClients(firebaseDb);
+        saveDatabase(firebaseDb);
+        setSyncError(null);
+        setLoading(false);
+      },
+      (error) => {
+        console.error('Failed to subscribe to Firestore. Using local cache fallback.', error);
+        setSyncError('Error de sincronización');
+        setLoading(false);
+      }
+    );
 
     // Retrieve previous session if any
     const savedSession = localStorage.getItem('crediulep_session');
@@ -53,7 +81,77 @@ export default function App() {
         console.error('Error parsing cached session', e);
       }
     }
+
+    return () => {
+      if (unsubscribe) {
+        unsubscribe();
+      }
+    };
   }, []);
+
+  // Track updates in logged-in client data to trigger push notifications
+  useEffect(() => {
+    if (!session || session.role !== 'client' || clients.length === 0) {
+      setPrevClientData(null);
+      return;
+    }
+
+    const currentClient = clients.find(c => c.cedula === session.cedula);
+    if (!currentClient) return;
+
+    if (!prevClientData) {
+      // Establish initial baseline (deep copy to avoid reference sharing)
+      setPrevClientData(JSON.parse(JSON.stringify(currentClient)));
+      return;
+    }
+
+    // 1. Detect credit status updates
+    const prevStatus = prevClientData.prestamo?.estado;
+    const currentStatus = currentClient.prestamo?.estado;
+
+    if (currentStatus && prevStatus && prevStatus !== currentStatus) {
+      const statusLabels: Record<string, string> = {
+        vigente: 'Vigente (Al día) ✅',
+        atrasado: 'Atrasado ⚠️',
+        cancelado: 'Cancelado/Pagado 🎉'
+      };
+      const label = statusLabels[currentStatus] || currentStatus;
+      sendPushNotification(
+        'Actualización de tu Crédito',
+        `El estado de tu crédito ha sido actualizado a: ${label}.`
+      );
+    }
+
+    // 2. Detect loan terms updates (monto or payment additions)
+    const prevMonto = prevClientData.prestamo?.montoOriginal;
+    const currentMonto = currentClient.prestamo?.montoOriginal;
+    if (prevMonto && currentMonto && prevMonto !== currentMonto) {
+      sendPushNotification(
+        'Modificación en tu Crédito',
+        `El monto original de tu crédito ha sido modificado por el administrador.`
+      );
+    }
+
+    // 3. Detect new admin messages
+    const prevMsgs = prevClientData.mensajes || [];
+    const currentMsgs = currentClient.mensajes || [];
+
+    if (currentMsgs.length > prevMsgs.length) {
+      // Find new messages
+      const newMsgs = currentMsgs.slice(prevMsgs.length);
+      const lastAdminMsg = [...newMsgs].reverse().find(m => m.remitente === 'admin');
+      
+      if (lastAdminMsg) {
+        sendPushNotification(
+          'Nuevo mensaje del Administrador',
+          lastAdminMsg.texto
+        );
+      }
+    }
+
+    // Update baseline
+    setPrevClientData(JSON.parse(JSON.stringify(currentClient)));
+  }, [clients, session]);
 
   // Sync state database changes back to utils & Firebase
   const handleSetClients = (updater: React.SetStateAction<Client[]>) => {
@@ -164,6 +262,7 @@ export default function App() {
       <ClientDashboard
         session={session}
         clients={clients}
+        setClients={handleSetClients}
         onLogout={handleLogout}
         syncError={syncError}
       />

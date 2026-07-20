@@ -25,6 +25,21 @@ export interface Loan {
   cuotas: Installment[];
 }
 
+export interface Message {
+  id: string;
+  remitente: 'admin' | 'cliente';
+  texto: string;
+  fecha: string;
+}
+
+export interface NotificationItem {
+  id: string;
+  titulo: string;
+  mensaje: string;
+  fecha: string;
+  leido: boolean;
+}
+
 export interface Client {
   cedula: string;
   contrasena: string;
@@ -35,6 +50,8 @@ export interface Client {
   prestamo: Loan | null;
   banco?: string;
   numeroCuenta?: string;
+  mensajes?: Message[];
+  notificaciones?: NotificationItem[];
 }
 
 export type UserRole = 'admin' | 'client';
