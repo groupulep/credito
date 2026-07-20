@@ -12,6 +12,7 @@ import LoginView from './components/LoginView';
 import AdminDashboard from './components/AdminDashboard';
 import ClientDashboard from './components/ClientDashboard';
 import LoadingScreen from './components/LoadingScreen';
+import { MessageCircle } from 'lucide-react';
 
 export default function App() {
   const [clients, setClients] = useState<Client[]>([]);
@@ -103,6 +104,31 @@ export default function App() {
     localStorage.removeItem('crediulep_session');
   };
 
+  const adminPhone = '573001234567';
+
+  const getWhatsAppSupportLink = () => {
+    const clientInfo = session && session.role !== 'admin' ? clients.find(c => c.cedula === session.cedula) : null;
+    let text = 'Hola CrediULEP, deseo realizar una consulta.';
+    if (clientInfo) {
+      text = `Hola CrediULEP, soy ${clientInfo.nombre} con Cédula ${clientInfo.cedula}. Deseo realizar una consulta.`;
+    }
+    return `https://api.whatsapp.com/send?phone=${adminPhone}&text=${encodeURIComponent(text)}`;
+  };
+
+  const whatsAppButton = (
+    <a
+      href={getWhatsAppSupportLink()}
+      target="_blank"
+      rel="noreferrer"
+      className="fixed bottom-6 right-6 z-50 flex items-center justify-center w-14 h-14 bg-emerald-500 hover:bg-emerald-600 active:scale-95 text-white rounded-full shadow-[0_4px_14px_rgba(16,185,129,0.4)] hover:shadow-[0_6px_20px_rgba(16,185,129,0.6)] transition-all duration-300 group"
+      title="Contactar soporte por WhatsApp"
+      id="whatsapp-floating-btn"
+    >
+      <span className="absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-30 animate-ping pointer-events-none"></span>
+      <MessageCircle className="w-6 h-6 relative z-10 transition-transform group-hover:scale-110" />
+    </a>
+  );
+
   if (loading) {
     return <LoadingScreen />;
   }
@@ -113,32 +139,35 @@ export default function App() {
       <div className="relative min-h-screen font-sans">
         <CosmicBackground />
         <LoginView clients={clients} onLoginSuccess={handleLogin} syncError={syncError} />
+        {whatsAppButton}
       </div>
     );
   }
 
   if (session.role === 'admin') {
     return (
-      <div className="font-sans">
+      <div className="font-sans relative min-h-screen">
         <AdminDashboard
           clients={clients}
           setClients={handleSetClients}
           onLogout={handleLogout}
           syncError={syncError}
         />
+        {whatsAppButton}
       </div>
     );
   }
 
   // Default: Client dashboard
   return (
-    <div className="font-sans">
+    <div className="font-sans relative min-h-screen">
       <ClientDashboard
         session={session}
         clients={clients}
         onLogout={handleLogout}
         syncError={syncError}
       />
+      {whatsAppButton}
     </div>
   );
 }

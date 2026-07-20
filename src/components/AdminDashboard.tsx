@@ -113,6 +113,8 @@ export default function AdminDashboard({
     correo: '',
     telefono: '',
     direccion: '',
+    banco: '',
+    numeroCuenta: '',
     // Loan terms
     monto: '5000000',
     tasa: '2.0',
@@ -131,6 +133,8 @@ export default function AdminDashboard({
   const [editCorreo, setEditCorreo] = useState('');
   const [editTelefono, setEditTelefono] = useState('');
   const [editDireccion, setEditDireccion] = useState('');
+  const [editBanco, setEditBanco] = useState('');
+  const [editNumeroCuenta, setEditNumeroCuenta] = useState('');
   const [editContrasena, setEditContrasena] = useState('');
   const [editHasLoan, setEditHasLoan] = useState(false);
   const [editMonto, setEditMonto] = useState('');
@@ -426,6 +430,8 @@ export default function AdminDashboard({
       telefono: newClient.telefono.trim() || '3000000000',
       direccion: newClient.direccion.trim() || 'No registrada',
       prestamo: newLoan,
+      banco: newClient.banco.trim() || 'No especificado',
+      numeroCuenta: newClient.numeroCuenta.trim() || 'No registrada',
     };
 
     const updatedClients = [...clients, addedClient];
@@ -439,6 +445,8 @@ export default function AdminDashboard({
       correo: '',
       telefono: '',
       direccion: '',
+      banco: '',
+      numeroCuenta: '',
       monto: '5000000',
       tasa: '2.0',
       plazo: '12',
@@ -528,6 +536,8 @@ export default function AdminDashboard({
         direccion: editDireccion.trim() || 'No registrada',
         contrasena: editContrasena.trim() || client.contrasena || newCedulaVal,
         prestamo: updatedLoan,
+        banco: editBanco.trim(),
+        numeroCuenta: editNumeroCuenta.trim(),
       };
     });
 
@@ -1627,6 +1637,30 @@ export default function AdminDashboard({
                             className="w-full bg-slate-50 border border-slate-200 focus:border-purple-500 focus:ring-1 focus:ring-purple-500/20 rounded-xl px-3.5 py-2.5 text-sm outline-none transition-all"
                           />
                         </div>
+
+                        <div className="grid grid-cols-2 gap-4">
+                          <div className="space-y-1">
+                            <label className="text-xs font-bold text-slate-500">Banco / Entidad</label>
+                            <input
+                              type="text"
+                              placeholder="Ej: Bancolombia, Nequi"
+                              value={newClient.banco}
+                              onChange={(e) => setNewClient({ ...newClient, banco: e.target.value })}
+                              className="w-full bg-slate-50 border border-slate-200 focus:border-purple-500 focus:ring-1 focus:ring-purple-500/20 rounded-xl px-3.5 py-2.5 text-sm outline-none transition-all"
+                            />
+                          </div>
+
+                          <div className="space-y-1">
+                            <label className="text-xs font-bold text-slate-500">N° de Cuenta</label>
+                            <input
+                              type="text"
+                              placeholder="Ej: Ahorros 12345"
+                              value={newClient.numeroCuenta}
+                              onChange={(e) => setNewClient({ ...newClient, numeroCuenta: e.target.value })}
+                              className="w-full bg-slate-50 border border-slate-200 focus:border-purple-500 focus:ring-1 focus:ring-purple-500/20 rounded-xl px-3.5 py-2.5 text-sm outline-none transition-all"
+                            />
+                          </div>
+                        </div>
                       </div>
 
                       {/* Section 2: Credit Terms */}
@@ -1917,6 +1951,8 @@ export default function AdminDashboard({
                                     setEditCorreo(client.correo);
                                     setEditTelefono(client.telefono);
                                     setEditDireccion(client.direccion);
+                                    setEditBanco(client.banco || '');
+                                    setEditNumeroCuenta(client.numeroCuenta || '');
                                     setEditContrasena(client.contrasena || client.cedula);
                                     setEditHasLoan(!!client.prestamo);
                                     if (client.prestamo) {
@@ -2546,6 +2582,28 @@ export default function AdminDashboard({
                             value={editDireccion}
                             onChange={(e) => setEditDireccion(e.target.value)}
                             className="w-full bg-slate-50 border border-slate-200 focus:border-purple-500 focus:ring-1 focus:ring-purple-500/20 rounded-xl px-3.5 py-2 text-sm outline-none transition-all"
+                          />
+                        </div>
+
+                        <div className="space-y-1">
+                          <label className="text-xs font-bold text-slate-500">Banco de la Cuenta</label>
+                          <input
+                            type="text"
+                            placeholder="Ej: Bancolombia, Nequi"
+                            value={editBanco}
+                            onChange={(e) => setEditBanco(e.target.value)}
+                            className="w-full bg-slate-50 border border-slate-200 focus:border-purple-500 focus:ring-1 focus:ring-purple-500/20 rounded-xl px-3.5 py-2 text-sm outline-none transition-all font-semibold"
+                          />
+                        </div>
+
+                        <div className="space-y-1">
+                          <label className="text-xs font-bold text-slate-500">Número de Cuenta</label>
+                          <input
+                            type="text"
+                            placeholder="Ej: Ahorros 123-45678"
+                            value={editNumeroCuenta}
+                            onChange={(e) => setEditNumeroCuenta(e.target.value)}
+                            className="w-full bg-slate-50 border border-slate-200 focus:border-purple-500 focus:ring-1 focus:ring-purple-500/20 rounded-xl px-3.5 py-2 text-sm outline-none transition-all font-semibold"
                           />
                         </div>
 

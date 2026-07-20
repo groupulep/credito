@@ -26,7 +26,8 @@ export { signInWithPopup, GoogleAuthProvider };
 // Initialize Firestore with specific database ID and force long polling
 export const db = initializeFirestore(app, {
   experimentalForceLongPolling: true,
-}, "ai-studio-crediulep-3ac3c98b-5554-4487-a577-229586eab8d9");
+  useFetchStreams: false,
+} as any, "ai-studio-crediulep-3ac3c98b-5554-4487-a577-229586eab8d9");
 
 // CRITICAL CONSTRAINT: When the application initially boots, call getFromServer to test the connection.
 async function testConnection() {

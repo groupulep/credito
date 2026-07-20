@@ -33,6 +33,8 @@ export interface Client {
   telefono: string;
   direccion: string;
   prestamo: Loan | null;
+  banco?: string;
+  numeroCuenta?: string;
 }
 
 export type UserRole = 'admin' | 'client';

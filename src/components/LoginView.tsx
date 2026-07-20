@@ -18,6 +18,7 @@ export default function LoginView({ clients, onLoginSuccess, syncError }: LoginV
   const [cedula, setCedula] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+  const [acceptDataTreatment, setAcceptDataTreatment] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
 
@@ -46,6 +47,12 @@ export default function LoginView({ clients, onLoginSuccess, syncError }: LoginV
     if (parseInt(captchaAnswer.trim()) !== expectedSum) {
       setError('El CAPTCHA de seguridad es incorrecto. Inténtalo de nuevo.');
       generateCaptcha();
+      return;
+    }
+
+    // Verify Personal Data Treatment Checkbox
+    if (!acceptDataTreatment) {
+      setError('Debe aceptar el tratamiento y lectura de datos personales para continuar.');
       return;
     }
 
@@ -287,6 +294,23 @@ export default function LoginView({ clients, onLoginSuccess, syncError }: LoginV
                     />
                   </div>
                 </div>
+              </div>
+
+              {/* Personal Data Treatment (Habeas Data) Acceptance Checkbox */}
+              <div className="flex items-start gap-3.5 bg-purple-50/20 hover:bg-purple-50/35 border border-purple-100/40 hover:border-purple-200/50 p-4 rounded-2xl transition-all duration-300">
+                <div className="flex items-center mt-0.5 shrink-0">
+                  <input
+                    type="checkbox"
+                    id="accept-data-treatment"
+                    checked={acceptDataTreatment}
+                    onChange={(e) => setAcceptDataTreatment(e.target.checked)}
+                    disabled={isLoading}
+                    className="w-4.5 h-4.5 text-purple-600 bg-white border-purple-200 rounded-lg focus:ring-purple-500 focus:ring-offset-0 cursor-pointer accent-purple-600"
+                  />
+                </div>
+                <label htmlFor="accept-data-treatment" className="text-xs text-slate-500 font-semibold leading-relaxed cursor-pointer select-none">
+                  Acepto el <strong className="font-bold text-slate-700">Tratamiento y Lectura de Datos Personales</strong> (Habeas Data) conforme a la Ley 1581 de Protección de Datos. Autorizo a CrediULEP para la consulta y reporte de mis obligaciones.
+                </label>
               </div>
 
               {/* Error message */}

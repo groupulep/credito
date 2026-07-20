@@ -4,7 +4,7 @@
  */
 
 import React, { useMemo, useState } from 'react';
-import { motion } from 'motion/react';
+import { motion, AnimatePresence } from 'motion/react';
 import {
   CheckCircle2,
   Clock,
@@ -23,7 +23,10 @@ import {
   Mail,
   Phone,
   Percent,
-  Sparkles
+  Sparkles,
+  User,
+  Landmark,
+  ShieldCheck
 } from 'lucide-react';
 import { Client, UserSession, Installment } from '../types';
 import { formatCurrency } from '../utils';
@@ -43,6 +46,7 @@ export default function ClientDashboard({ session, clients, onLogout, syncError 
 
   const [requestedAmount, setRequestedAmount] = useState<number>(2000000); // Default to $2,000,000 COP
   const [paymentFilter, setPaymentFilter] = useState<'all' | 'pending' | 'paid'>('all');
+  const [showProfile, setShowProfile] = useState<boolean>(false);
 
   const initials = useMemo(() => {
     if (!clientData) return 'C';
@@ -97,6 +101,62 @@ export default function ClientDashboard({ session, clients, onLogout, syncError 
     };
   }, [clientData]);
 
+  // Compute days stats for the current installment cycle
+  const daysStats = useMemo(() => {
+    if (!clientData || !clientData.prestamo) return null;
+    const loan = clientData.prestamo;
+    
+    // Find next unpaid cuota
+    const unpaidCuotas = loan.cuotas.filter((c) => !c.pagado);
+    if (unpaidCuotas.length === 0) {
+      return { totalDays: 30, elapsedDays: 30, daysRemaining: 0, pct: 100, nextCuotaNum: loan.cuotas.length };
+    }
+    
+    const nextCuota = unpaidCuotas[0];
+    
+    // Period start date is either the last paid cuota's date, or the loan start date
+    const paidCuotas = loan.cuotas.filter((c) => c.pagado);
+    let periodStartStr = loan.fechaInicio;
+    if (paidCuotas.length > 0) {
+      const lastPaid = paidCuotas[paidCuotas.length - 1];
+      periodStartStr = lastPaid.fechaVencimiento;
+    }
+    
+    // Calculate difference
+    const startParts = periodStartStr.split('-').map(Number);
+    const dueParts = nextCuota.fechaVencimiento.split('-').map(Number);
+    
+    // Use Date.UTC to avoid local timezone offsets
+    const startDateObj = new Date(Date.UTC(startParts[0], startParts[1] - 1, startParts[2]));
+    const dueDateObj = new Date(Date.UTC(dueParts[0], dueParts[1] - 1, dueParts[2]));
+    
+    // Current date - normalize to UTC midnight
+    const todayRaw = new Date();
+    const todayObj = new Date(Date.UTC(todayRaw.getFullYear(), todayRaw.getMonth(), todayRaw.getDate()));
+    
+    // Total days in the current cycle
+    const totalDiffMs = dueDateObj.getTime() - startDateObj.getTime();
+    const totalDays = Math.max(1, Math.round(totalDiffMs / (1000 * 60 * 60 * 24)));
+    
+    // Days remaining until due date
+    const remainingDiffMs = dueDateObj.getTime() - todayObj.getTime();
+    const daysRemaining = Math.max(0, Math.round(remainingDiffMs / (1000 * 60 * 60 * 24)));
+    
+    // Days elapsed
+    const elapsedDays = Math.max(0, totalDays - daysRemaining);
+    
+    // Percentage
+    const pct = Math.round((elapsedDays / totalDays) * 100);
+    
+    return {
+      totalDays,
+      elapsedDays,
+      daysRemaining,
+      pct,
+      nextCuotaNum: nextCuota.numero,
+    };
+  }, [clientData]);
+
   // WhatsApp Preconfigured Message templates
   const openWhatsAppTemplate = (type: 'consulta' | 'nuevo_credito' | 'reportar_pago') => {
     if (!clientData) return;
@@ -114,7 +174,20 @@ export default function ClientDashboard({ session, clients, onLogout, syncError 
       }
       text = `Hola CrediULEP, soy ${nombre} con Cédula ${cedula}. He cancelado mi deuda anterior y me encuentro a paz y salvo. Solicito formalmente el estudio de un nuevo financiamiento.`;
     } else if (type === 'reportar_pago') {
-      text = `Hola CrediULEP, soy ${nombre} con Cédula ${cedula}. Deseo pagar mi cuota actual.`;
+      const nextCuotaNum = loanStats ? loanStats.paidCount + 1 : 1;
+      const totalCuotas = loanStats ? loanStats.term : 12;
+      const cuotaAmount = loanStats ? loanStats.nextPaymentAmount : 0;
+      const originalAmount = loanStats ? loanStats.originalCapital : 0;
+      const remainingBalance = loanStats ? loanStats.totalOutstanding : 0;
+      
+      text = `¡Hola CrediULEP! 👋\n\n*REPORTE DE PAGO DE CUOTA*\n\n` +
+             `• *Socio:* ${nombre}\n` +
+             `• *Cédula:* ${cedula}\n` +
+             `• *Monto Solicitado:* ${formatCurrency(originalAmount)}\n` +
+             `• *Cuota a Pagar:* Cuota #${nextCuotaNum} de ${totalCuotas}\n` +
+             `• *Valor de la Cuota:* ${formatCurrency(cuotaAmount)}\n` +
+             `• *Saldo Pendiente:* ${formatCurrency(remainingBalance)}\n\n` +
+             `Deseo reportar el pago de mi cuota. A continuación adjunto el comprobante correspondiente para su validación en el sistema.`;
     }
 
     const url = `https://api.whatsapp.com/send?phone=${adminPhone}&text=${encodeURIComponent(text)}`;
@@ -244,8 +317,139 @@ export default function ClientDashboard({ session, clients, onLogout, syncError 
             <span className="text-[10px] font-bold text-purple-400 uppercase tracking-widest block">Contacto en Base de Datos</span>
             <span className="text-sm font-bold text-purple-700 block">{clientData.correo}</span>
             <span className="text-xs text-slate-500 block font-mono">Tel: {clientData.telefono}</span>
+            <button
+              onClick={() => setShowProfile(!showProfile)}
+              className={`mt-3 flex items-center gap-2 px-4 py-2 rounded-2xl text-xs font-bold transition-all border cursor-pointer ${
+                showProfile
+                  ? 'bg-purple-600 text-white border-purple-600 shadow-md shadow-purple-500/10'
+                  : 'bg-slate-50 hover:bg-purple-50 text-slate-700 hover:text-purple-700 border-slate-200 hover:border-purple-200'
+              }`}
+              id="toggle-profile-panel-btn"
+            >
+              <User className="w-4 h-4" />
+              <span>{showProfile ? 'Cerrar Perfil' : 'Ver Mi Perfil'}</span>
+            </button>
           </div>
         </motion.section>
+
+        {/* Panel de Perfil del Cliente */}
+        <AnimatePresence>
+          {showProfile && (
+            <motion.section
+              initial={{ opacity: 0, height: 0, y: -10 }}
+              animate={{ opacity: 1, height: 'auto', y: 0 }}
+              exit={{ opacity: 0, height: 0, y: -10 }}
+              transition={{ duration: 0.3, ease: "easeInOut" }}
+              className="bg-white border border-purple-100 rounded-3xl p-6 md:p-8 shadow-lg shadow-purple-100/20 relative overflow-hidden"
+              id="client-profile-panel"
+            >
+              {/* Decorative backgrounds */}
+              <div className="absolute top-[-20%] right-[-10%] w-64 h-64 bg-purple-50/40 rounded-full blur-3xl pointer-events-none" />
+              <div className="absolute bottom-[-10%] left-[-10%] w-64 h-64 bg-emerald-50/30 rounded-full blur-3xl pointer-events-none" />
+
+              <div className="relative z-10 space-y-6">
+                {/* Header of Profile */}
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-4">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2.5 bg-purple-50 text-purple-600 rounded-2xl border border-purple-100/50">
+                      <User className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <h3 className="text-lg font-extrabold text-slate-900 tracking-tight font-sans">Mi Perfil Personal & Bancario</h3>
+                      <p className="text-xs text-slate-400">Verifica tus datos de contacto y de cuenta registrados en el sistema</p>
+                    </div>
+                  </div>
+                  
+                  {/* Status label */}
+                  <div className="flex items-center gap-1.5 self-start sm:self-center px-3 py-1.5 rounded-full bg-purple-50 text-purple-700 border border-purple-100 text-xs font-semibold">
+                    <ShieldCheck className="w-4 h-4 text-purple-600" />
+                    <span>Datos Verificados</span>
+                  </div>
+                </div>
+
+                {/* Profile Grid Details */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                  {/* Col 1: Datos Personales */}
+                  <div className="space-y-4">
+                    <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest flex items-center gap-1.5">
+                      <User className="w-3.5 h-3.5 text-purple-500" />
+                      Información de Contacto
+                    </h4>
+                    
+                    <div className="bg-slate-50/50 p-4 rounded-2xl border border-slate-100 space-y-3.5">
+                      <div className="grid grid-cols-3 gap-2 py-0.5 border-b border-slate-100/50 pb-2">
+                        <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Nombre</span>
+                        <span className="col-span-2 text-xs font-bold text-slate-800">{clientData.nombre}</span>
+                      </div>
+                      
+                      <div className="grid grid-cols-3 gap-2 py-0.5 border-b border-slate-100/50 pb-2">
+                        <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Identificación</span>
+                        <span className="col-span-2 text-xs font-bold text-slate-800 font-mono">C.C. {clientData.cedula}</span>
+                      </div>
+
+                      <div className="grid grid-cols-3 gap-2 py-0.5 border-b border-slate-100/50 pb-2">
+                        <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Celular / Tel</span>
+                        <span className="col-span-2 text-xs font-bold text-slate-800 font-mono">{clientData.telefono}</span>
+                      </div>
+
+                      <div className="grid grid-cols-3 gap-2 py-0.5 border-b border-slate-100/50 pb-2">
+                        <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Correo</span>
+                        <span className="col-span-2 text-xs font-bold text-slate-800">{clientData.correo}</span>
+                      </div>
+
+                      <div className="grid grid-cols-3 gap-2 py-0.5">
+                        <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Dirección</span>
+                        <span className="col-span-2 text-xs font-medium text-slate-700">{clientData.direccion}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Col 2: Cuenta Bancaria & Seguridad */}
+                  <div className="space-y-4">
+                    <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest flex items-center gap-1.5">
+                      <Landmark className="w-3.5 h-3.5 text-purple-500" />
+                      Cuenta para Desembolsos y Pagos
+                    </h4>
+
+                    <div className="bg-purple-50/20 p-5 rounded-2xl border border-purple-100/40 space-y-4">
+                      <div className="flex items-start gap-3">
+                        <div className="p-2.5 bg-white text-purple-600 rounded-xl shadow-sm border border-purple-100/50 shrink-0">
+                          <Landmark className="w-4 h-4" />
+                        </div>
+                        <div className="space-y-1">
+                          <span className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">Banco o Entidad Financiera</span>
+                          <span className="block text-sm font-extrabold text-purple-900 uppercase">
+                            {clientData.banco || 'No especificado'}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="flex items-start gap-3 border-t border-purple-100/30 pt-3">
+                        <div className="p-2.5 bg-white text-purple-600 rounded-xl shadow-sm border border-purple-100/50 shrink-0 font-mono text-xs font-bold">
+                          N°
+                        </div>
+                        <div className="space-y-1">
+                          <span className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">Número de Cuenta Registrada</span>
+                          <span className="block text-sm font-mono font-bold text-slate-800">
+                            {clientData.numeroCuenta || 'No registrada'}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Admin notice regarding safety and edit permission */}
+                    <div className="p-3.5 rounded-xl bg-amber-50/50 border border-amber-100/30 flex items-start gap-2.5 text-[11px] text-amber-700">
+                      <AlertTriangle className="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
+                      <p className="leading-relaxed">
+                        <strong className="font-extrabold">Aviso de seguridad:</strong> Para proteger la integridad de tus fondos, estos datos son de <span className="underline">solo lectura</span> para el afiliado. Si necesitas actualizar tu banco, número de cuenta o algún dato de contacto, por favor ponte en contacto con un asesor para que el Administrador realice la modificación.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </motion.section>
+          )}
+        </AnimatePresence>
 
         {/* ----------------- CASE: ACTIVE LOAN ----------------- */}
         {!isPazYSalvo && loanStats && clientData.prestamo && (
@@ -254,45 +458,146 @@ export default function ClientDashboard({ session, clients, onLogout, syncError 
             {/* Left Column (5 of 12 cols): Banking Card, Payment Status & Support */}
             <div className="lg:col-span-5 space-y-8">
               
-              {/* 1. Luxury Platinum Credit Card */}
+              {/* 1. Interactive Dual-Ring Credit Progress Circle */}
               <motion.div
                 initial={{ opacity: 0, scale: 0.98 }}
                 animate={{ opacity: 1, scale: 1 }}
-                className="bg-gradient-to-br from-purple-800 via-indigo-950 to-slate-950 text-white p-6 rounded-3xl shadow-xl shadow-purple-900/10 relative overflow-hidden flex flex-col justify-between h-[230px] border border-white/10"
-                id="digital-platinum-card"
+                className="bg-white border border-purple-100 p-6 rounded-3xl shadow-lg shadow-purple-100/30 relative overflow-hidden flex flex-col items-center justify-center space-y-6"
+                id="digital-loan-progress-circle-card"
               >
-                {/* Metallic luster vector overlays */}
-                <div className="absolute top-0 right-0 w-48 h-48 bg-white/5 rounded-full blur-2xl pointer-events-none" />
-                <div className="absolute -bottom-8 -left-8 w-40 h-40 bg-purple-600/10 rounded-full blur-xl pointer-events-none" />
-                
+                {/* Decorative gradients */}
+                <div className="absolute top-[-20%] left-[-20%] w-48 h-48 bg-purple-50/50 rounded-full blur-3xl pointer-events-none" />
+                <div className="absolute bottom-[-20%] right-[-20%] w-48 h-48 bg-emerald-50/40 rounded-full blur-3xl pointer-events-none" />
+
                 {/* Card Top: Branding */}
-                <div className="flex items-center justify-between relative z-10">
+                <div className="w-full flex items-center justify-between border-b border-slate-50 pb-3 relative z-10">
                   <div>
-                    <span className="text-[10px] font-black uppercase tracking-widest text-purple-300">CrediULEP Platinum</span>
-                    <span className="block text-[8px] text-slate-400 font-bold uppercase tracking-widest mt-0.5">Socio de Honor</span>
+                    <span className="text-[11px] font-bold uppercase tracking-wider text-purple-700">Resumen de tu Crédito</span>
+                    <span className="block text-[8px] text-slate-400 font-bold uppercase tracking-widest mt-0.5">Plan Activo • CrediULEP</span>
                   </div>
-                  <div className="w-8 h-8 rounded-lg bg-gradient-to-r from-amber-400 to-amber-500/80 flex items-center justify-center shadow-inner text-[10px] font-extrabold text-amber-950">
-                    CHIP
+                  <div className="px-2.5 py-0.5 rounded bg-purple-50/60 text-purple-600 text-[9px] font-bold font-mono border border-purple-100/40">
+                    C.C. {clientData.cedula}
                   </div>
                 </div>
 
-                {/* Card Middle: Ledger Metric */}
-                <div className="relative z-10">
-                  <span className="text-[9px] text-slate-400 uppercase font-black tracking-widest block">Saldo Vigente Cartera</span>
-                  <span className="text-3xl font-black font-mono tracking-tight text-white block mt-1">
-                    {formatCurrency(loanStats.totalOutstanding)}
-                  </span>
+                {/* SVG Concentric Rings */}
+                <div className="relative flex items-center justify-center h-[200px] w-[200px] z-10">
+                  <svg className="w-full h-full transform -rotate-90" viewBox="0 0 200 200">
+                    <defs>
+                      <linearGradient id="purpleGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                        <stop offset="0%" stopColor="#8b5cf6" />
+                        <stop offset="100%" stopColor="#6366f1" />
+                      </linearGradient>
+                      <linearGradient id="emeraldGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                        <stop offset="0%" stopColor="#34d399" />
+                        <stop offset="100%" stopColor="#10b981" />
+                      </linearGradient>
+                    </defs>
+
+                    {/* Outer Ring: Loan Installments Progress (Monto/Cuotas) */}
+                    {/* Background track */}
+                    <circle
+                      cx="100"
+                      cy="100"
+                      r="80"
+                      fill="transparent"
+                      stroke="#f1f5f9"
+                      strokeWidth="10"
+                    />
+                    {/* Active progress */}
+                    <motion.circle
+                      cx="100"
+                      cy="100"
+                      r="80"
+                      fill="transparent"
+                      stroke="url(#purpleGrad)"
+                      strokeWidth="10"
+                      strokeDasharray={2 * Math.PI * 80}
+                      initial={{ strokeDashoffset: 2 * Math.PI * 80 }}
+                      animate={{ strokeDashoffset: 2 * Math.PI * 80 - (2 * Math.PI * 80 * (loanStats?.progressPct || 0)) / 100 }}
+                      transition={{ duration: 1.2, ease: "easeOut" }}
+                      strokeLinecap="round"
+                    />
+
+                    {/* Inner Ring: Current Cycle Progress in Days */}
+                    {/* Background track */}
+                    <circle
+                      cx="100"
+                      cy="100"
+                      r="60"
+                      fill="transparent"
+                      stroke="#f1f5f9"
+                      strokeWidth="8"
+                    />
+                    {/* Active progress */}
+                    <motion.circle
+                      cx="100"
+                      cy="100"
+                      r="60"
+                      fill="transparent"
+                      stroke="url(#emeraldGrad)"
+                      strokeWidth="8"
+                      strokeDasharray={2 * Math.PI * 60}
+                      initial={{ strokeDashoffset: 2 * Math.PI * 60 }}
+                      animate={{ strokeDashoffset: 2 * Math.PI * 60 - (2 * Math.PI * 60 * (daysStats ? daysStats.pct : 0)) / 100 }}
+                      transition={{ duration: 1.5, ease: "easeOut" }}
+                      strokeLinecap="round"
+                    />
+                  </svg>
+
+                  {/* Centered text within circle */}
+                  <div className="absolute flex flex-col items-center justify-center text-center">
+                    <span className="text-[10px] text-slate-400 font-medium uppercase tracking-wider">Saldo Pendiente</span>
+                    <span className="text-2xl font-bold text-slate-800 font-mono tracking-tight mt-0.5">
+                      {formatCurrency(loanStats.totalOutstanding)}
+                    </span>
+                    <div className="flex items-center gap-1.5 mt-1.5 bg-purple-50/50 px-2.5 py-1 rounded-full border border-purple-100/40">
+                      <span className="w-1.5 h-1.5 rounded-full bg-purple-500 inline-block animate-pulse" />
+                      <span className="text-[9px] font-bold text-purple-700 tracking-wide">
+                        {loanStats.paidCount} de {loanStats.term} Cuotas
+                      </span>
+                    </div>
+                  </div>
                 </div>
 
-                {/* Card Bottom: Holder Name & Security details */}
-                <div className="flex items-end justify-between relative z-10 text-[10px] font-mono">
-                  <div>
-                    <span className="block text-[8px] text-slate-400 uppercase font-bold tracking-widest">Titular de Cuenta</span>
-                    <span className="font-bold text-slate-200 tracking-wider uppercase">{clientData.nombre}</span>
+                {/* Ring Explanations and stats */}
+                <div className="w-full grid grid-cols-2 gap-4 pt-4 border-t border-slate-50 relative z-10 text-left">
+                  {/* Outer Ring Legend */}
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-1.5">
+                      <span className="w-2 h-2 rounded-full bg-purple-400 block shrink-0" />
+                      <span className="text-[11px] font-bold text-slate-700 tracking-wide">Monto Pagado</span>
+                    </div>
+                    <div className="pl-3.5">
+                      <span className="block text-[8px] text-slate-400 uppercase font-bold tracking-wider">Crédito Solicitado</span>
+                      <span className="block font-mono text-xs font-bold text-slate-800">{formatCurrency(loanStats.originalCapital)}</span>
+                      <span className="block text-[9px] text-purple-600 font-medium mt-0.5">{loanStats.progressPct}% Amortizado</span>
+                    </div>
                   </div>
-                  <div className="text-right">
-                    <span className="block text-[8px] text-slate-400 uppercase font-bold tracking-widest">Interés Pactado</span>
-                    <span className="font-extrabold text-purple-300">1.5% mensual</span>
+
+                  {/* Inner Ring Legend */}
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-1.5">
+                      <span className="w-2 h-2 rounded-full bg-emerald-400 block shrink-0" />
+                      <span className="text-[11px] font-bold text-slate-700 tracking-wide">Días de Cuota</span>
+                    </div>
+                    <div className="pl-3.5">
+                      <span className="block text-[8px] text-slate-400 uppercase font-bold tracking-wider">Tiempo Transcurrido</span>
+                      <span className="block font-mono text-xs font-bold text-slate-800">
+                        {daysStats?.elapsedDays} de {daysStats?.totalDays} días
+                      </span>
+                      {daysStats && (
+                        <span className={`block text-[9px] font-bold uppercase mt-1 px-1.5 py-0.5 rounded-md inline-block border text-center ${
+                          daysStats.daysRemaining === 0 
+                            ? 'bg-rose-50 text-rose-600 border-rose-100/40' 
+                            : daysStats.daysRemaining <= 5 
+                              ? 'bg-amber-50 text-amber-600 border-amber-100/40' 
+                              : 'bg-emerald-50 text-emerald-600 border-emerald-100/40'
+                        }`}>
+                          {daysStats.daysRemaining === 0 ? '¡Vence Hoy!' : `Faltan ${daysStats.daysRemaining} días`}
+                        </span>
+                      )}
+                    </div>
                   </div>
                 </div>
               </motion.div>
@@ -349,10 +654,10 @@ export default function ClientDashboard({ session, clients, onLogout, syncError 
                     {/* Pay Cuota WhatsApp Trigger */}
                     <button
                       onClick={() => openWhatsAppTemplate('reportar_pago')}
-                      className="w-full flex items-center justify-center gap-2 py-3.5 bg-gradient-to-r from-purple-600 to-purple-700 hover:from-purple-500 hover:to-purple-600 text-white rounded-2xl font-bold shadow-lg shadow-purple-500/15 transition-all text-xs uppercase tracking-wider cursor-pointer"
+                      className="w-full flex items-center justify-center gap-2 py-3 bg-gradient-to-r from-purple-600 to-purple-700 hover:from-purple-500 hover:to-purple-600 text-white rounded-2xl font-bold shadow-md shadow-purple-500/10 active:scale-[0.98] transition-all text-sm cursor-pointer"
                     >
                       <Send className="w-4 h-4" />
-                      <span>Pagar cuota por WhatsApp</span>
+                      <span>Pagar</span>
                     </button>
                   </div>
                 ) : (
@@ -551,46 +856,80 @@ export default function ClientDashboard({ session, clients, onLogout, syncError 
             {/* Left Column (5 of 12 cols): Available credit badge & support */}
             <div className="lg:col-span-5 space-y-8">
               
-              {/* 1. Pre-Approved Platinum Credit Card */}
+              {/* 1. Pre-Approved Circular Credit Meter */}
               <motion.div
                 initial={{ opacity: 0, scale: 0.98 }}
                 animate={{ opacity: 1, scale: 1 }}
-                className="bg-gradient-to-br from-purple-800 via-indigo-950 to-slate-950 text-white p-6 rounded-3xl shadow-xl shadow-purple-900/10 relative overflow-hidden flex flex-col justify-between h-[230px] border border-white/10"
-                id="digital-preapproved-card"
+                className="bg-white border border-purple-100 p-6 rounded-3xl shadow-lg shadow-purple-100/30 relative overflow-hidden flex flex-col items-center justify-center space-y-6"
+                id="digital-preapproved-circle-card"
               >
-                {/* Metallic luster vector overlays */}
-                <div className="absolute top-0 right-0 w-48 h-48 bg-white/5 rounded-full blur-2xl pointer-events-none" />
-                <div className="absolute -bottom-8 -left-8 w-40 h-40 bg-purple-600/10 rounded-full blur-xl pointer-events-none" />
-                
+                {/* Decorative gradients */}
+                <div className="absolute top-[-20%] left-[-20%] w-48 h-48 bg-emerald-50/50 rounded-full blur-3xl pointer-events-none" />
+                <div className="absolute bottom-[-20%] right-[-20%] w-48 h-48 bg-purple-50/40 rounded-full blur-3xl pointer-events-none" />
+
                 {/* Card Top */}
-                <div className="flex items-center justify-between relative z-10">
+                <div className="w-full flex items-center justify-between border-b border-slate-50 pb-3 relative z-10">
                   <div>
-                    <span className="text-[10px] font-black uppercase tracking-widest text-purple-300">CrediULEP Platinum</span>
-                    <span className="block text-[8px] text-emerald-400 font-bold uppercase tracking-widest mt-0.5">Pre-aprobado</span>
+                    <span className="text-[10px] font-black uppercase tracking-widest text-emerald-600">Cupo de Crédito</span>
+                    <span className="block text-[8px] text-slate-400 font-bold uppercase tracking-widest mt-0.5">Pre-Aprobado • CrediULEP</span>
                   </div>
-                  <div className="w-8 h-8 rounded-lg bg-gradient-to-r from-amber-400 to-amber-500/80 flex items-center justify-center shadow-inner text-[10px] font-extrabold text-amber-950">
-                    CHIP
+                  <div className="px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 text-[9px] font-bold font-mono border border-emerald-100">
+                    Excelente
                   </div>
                 </div>
 
-                {/* Card Middle */}
-                <div className="relative z-10">
-                  <span className="text-[9px] text-slate-400 uppercase font-black tracking-widest block">Cupo Pre-Aprobado Inmediato</span>
-                  <span className="text-3xl font-black font-mono tracking-tight text-white block mt-1">
-                    $5,000,000
-                  </span>
+                {/* SVG Concentric Rings */}
+                <div className="relative flex items-center justify-center h-[200px] w-[200px] z-10">
+                  <svg className="w-full h-full transform -rotate-90" viewBox="0 0 200 200">
+                    <defs>
+                      <linearGradient id="emeraldGrad2" x1="0%" y1="0%" x2="100%" y2="100%">
+                        <stop offset="0%" stopColor="#10b981" />
+                        <stop offset="100%" stopColor="#059669" />
+                      </linearGradient>
+                    </defs>
+
+                    {/* Single Outer Ring representing 100% credit capacity */}
+                    <circle
+                      cx="100"
+                      cy="100"
+                      r="80"
+                      fill="transparent"
+                      stroke="#e2e8f0"
+                      strokeWidth="10"
+                    />
+                    <motion.circle
+                      cx="100"
+                      cy="100"
+                      r="80"
+                      fill="transparent"
+                      stroke="url(#emeraldGrad2)"
+                      strokeWidth="10"
+                      strokeDasharray={2 * Math.PI * 80}
+                      initial={{ strokeDashoffset: 2 * Math.PI * 80 }}
+                      animate={{ strokeDashoffset: 0 }}
+                      transition={{ duration: 1.5, ease: "easeOut" }}
+                      strokeLinecap="round"
+                    />
+                  </svg>
+
+                  {/* Centered text */}
+                  <div className="absolute flex flex-col items-center justify-center text-center">
+                    <span className="text-[9px] text-slate-400 font-bold uppercase tracking-widest">Disponible</span>
+                    <span className="text-2xl font-black text-slate-900 font-mono tracking-tight mt-0.5">
+                      $5,000,000
+                    </span>
+                    <div className="flex items-center gap-1 mt-1 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-100">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block animate-pulse" />
+                      <span className="text-[8px] font-black text-emerald-700 uppercase tracking-wider">
+                        100% Disponible
+                      </span>
+                    </div>
+                  </div>
                 </div>
 
-                {/* Card Bottom */}
-                <div className="flex items-end justify-between relative z-10 text-[10px] font-mono">
-                  <div>
-                    <span className="block text-[8px] text-slate-400 uppercase font-bold tracking-widest">Titular de Cuenta</span>
-                    <span className="font-bold text-slate-200 tracking-wider uppercase">{clientData.nombre}</span>
-                  </div>
-                  <div className="text-right">
-                    <span className="block text-[8px] text-slate-400 uppercase font-bold tracking-widest">Capacidad de Pago</span>
-                    <span className="font-extrabold text-emerald-400 uppercase tracking-wider text-[9px]">Excelente</span>
-                  </div>
+                <div className="w-full text-center space-y-1 pt-2 border-t border-slate-50 relative z-10 text-center">
+                  <span className="text-[10px] font-black text-slate-500 uppercase tracking-wider block">Titular de Cuenta</span>
+                  <p className="font-bold text-slate-800 text-sm tracking-wide uppercase">{clientData.nombre}</p>
                 </div>
               </motion.div>
 
