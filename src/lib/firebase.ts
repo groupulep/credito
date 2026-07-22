@@ -1,17 +1,8 @@
 import { initializeApp } from 'firebase/app';
-import { initializeFirestore, collection, doc, getDocs, setDoc, updateDoc, deleteDoc, writeBatch, getDocFromServer, onSnapshot } from 'firebase/firestore';
+import { getFirestore, collection, doc, getDocs, setDoc, deleteDoc, writeBatch, getDocFromServer, onSnapshot } from 'firebase/firestore';
 import { getAuth, GoogleAuthProvider, signInWithPopup } from 'firebase/auth';
 import { Client } from '../types';
-import { PRE_SEEDED_CLIENTS } from '../utils';
-
-const firebaseConfig = {
-  apiKey: "AIzaSyAMT5aeaY-Elj934ioKYzpbY3zwJG1Ybjw",
-  authDomain: "gen-lang-client-0778123662.firebaseapp.com",
-  projectId: "gen-lang-client-0778123662",
-  storageBucket: "gen-lang-client-0778123662.firebasestorage.app",
-  messagingSenderId: "197378777119",
-  appId: "1:197378777119:web:104569da124a8e33e9f52a"
-};
+import firebaseConfig from '../../firebase-applet-config.json';
 
 // Initialize Firebase
 const app = initializeApp(firebaseConfig);
@@ -23,11 +14,27 @@ googleProvider.addScope('https://www.googleapis.com/auth/gmail.send');
 
 export { signInWithPopup, GoogleAuthProvider };
 
-// Initialize Firestore with specific database ID and force long polling
-export const db = initializeFirestore(app, {
-  experimentalForceLongPolling: true,
-  useFetchStreams: false,
-} as any, "ai-studio-crediulep-3ac3c98b-5554-4487-a577-229586eab8d9");
+// Initialize Firestore with database ID from config
+export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
+
+// Helper to sanitize client objects so no undefined fields cause Firestore setDoc failures
+export function sanitizeClient(client: Client): Client {
+  const cleanObj = JSON.parse(JSON.stringify(client));
+  return {
+    cedula: String(cleanObj.cedula || '').trim(),
+    contrasena: String(cleanObj.contrasena || cleanObj.cedula || '').trim(),
+    nombre: String(cleanObj.nombre || '').trim(),
+    correo: String(cleanObj.correo || '').trim(),
+    telefono: String(cleanObj.telefono || '').trim(),
+    direccion: String(cleanObj.direccion || '').trim(),
+    prestamo: cleanObj.prestamo || null,
+    banco: cleanObj.banco || 'No especificado',
+    numeroCuenta: cleanObj.numeroCuenta || 'No registrada',
+    mensajes: Array.isArray(cleanObj.mensajes) ? cleanObj.mensajes : [],
+    notificaciones: Array.isArray(cleanObj.notificaciones) ? cleanObj.notificaciones : [],
+    montoMaximo: typeof cleanObj.montoMaximo === 'number' ? cleanObj.montoMaximo : 10000000,
+  };
+}
 
 // CRITICAL CONSTRAINT: When the application initially boots, call getFromServer to test the connection.
 async function testConnection() {
@@ -74,18 +81,13 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
   throw new Error(JSON.stringify(errInfo));
 }
 
-// Fetch all clients from Firestore. If empty, seed from PRE_SEEDED_CLIENTS.
+// Fetch all clients from Firestore.
 export async function fetchClientsFromFirebase(): Promise<Client[]> {
   try {
     const querySnapshot = await getDocs(collection(db, CLIENTS_COLLECTION));
-    if (querySnapshot.empty) {
-      console.log('No clients found in Firebase. Seeding default clients...');
-      await seedClientsToFirebase(PRE_SEEDED_CLIENTS);
-      return PRE_SEEDED_CLIENTS;
-    }
     const clients: Client[] = [];
     querySnapshot.forEach((doc) => {
-      clients.push(doc.data() as Client);
+      clients.push(sanitizeClient(doc.data() as Client));
     });
     return clients;
   } catch (error) {
@@ -96,10 +98,12 @@ export async function fetchClientsFromFirebase(): Promise<Client[]> {
 // Seed initial clients to Firebase
 export async function seedClientsToFirebase(initialClients: Client[]): Promise<void> {
   try {
+    if (initialClients.length === 0) return;
     const batch = writeBatch(db);
     initialClients.forEach((client) => {
-      const docRef = doc(db, CLIENTS_COLLECTION, client.cedula);
-      batch.set(docRef, client);
+      const cleanClient = sanitizeClient(client);
+      const docRef = doc(db, CLIENTS_COLLECTION, cleanClient.cedula);
+      batch.set(docRef, cleanClient);
     });
     await batch.commit();
     console.log('Successfully seeded clients to Firebase!');
@@ -111,9 +115,10 @@ export async function seedClientsToFirebase(initialClients: Client[]): Promise<v
 // Save or update a single client in Firebase
 export async function saveClientToFirebase(client: Client): Promise<void> {
   try {
-    const docRef = doc(db, CLIENTS_COLLECTION, client.cedula);
-    await setDoc(docRef, client);
-    console.log(`Saved client ${client.nombre} to Firebase`);
+    const cleanClient = sanitizeClient(client);
+    const docRef = doc(db, CLIENTS_COLLECTION, cleanClient.cedula);
+    await setDoc(docRef, cleanClient);
+    console.log(`Saved client ${cleanClient.nombre} to Firebase`);
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, `${CLIENTS_COLLECTION}/${client.cedula}`);
   }
@@ -135,8 +140,9 @@ export async function syncAllClientsToFirebase(clients: Client[]): Promise<void>
   try {
     const batch = writeBatch(db);
     clients.forEach((client) => {
-      const docRef = doc(db, CLIENTS_COLLECTION, client.cedula);
-      batch.set(docRef, client);
+      const cleanClient = sanitizeClient(client);
+      const docRef = doc(db, CLIENTS_COLLECTION, cleanClient.cedula);
+      batch.set(docRef, cleanClient);
     });
     await batch.commit();
     console.log('Successfully synchronized all clients to Firebase!');
@@ -145,20 +151,16 @@ export async function syncAllClientsToFirebase(clients: Client[]): Promise<void>
   }
 }
 
-// Live real-time subscription for reactive changes (push notification triggers)
+// Live real-time subscription for reactive changes
 export function subscribeToClients(onUpdate: (clients: Client[]) => void, onError: (error: Error) => void) {
   const q = collection(db, CLIENTS_COLLECTION);
   return onSnapshot(q, (querySnapshot) => {
-    if (querySnapshot.empty) {
-      onUpdate([]);
-      return;
-    }
     const clientsList: Client[] = [];
     const testCedulas = ['12345', '98765', '11111'];
     querySnapshot.forEach((docSnap) => {
       const data = docSnap.data() as Client;
       if (!testCedulas.includes(data.cedula)) {
-        clientsList.push(data);
+        clientsList.push(sanitizeClient(data));
       } else {
         deleteClientFromFirebase(data.cedula).catch(err => console.error('Error deleting test client:', err));
       }

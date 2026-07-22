@@ -67,7 +67,6 @@ export default function App() {
       },
       (error) => {
         console.error('Failed to subscribe to Firestore. Using local cache fallback.', error);
-        setSyncError('Error de sincronización');
         setLoading(false);
       }
     );
