@@ -1,23 +1,12 @@
-import { initializeApp } from 'firebase/app';
-import { getFirestore, collection, doc, getDocs, setDoc, deleteDoc, writeBatch, getDocFromServer, onSnapshot } from 'firebase/firestore';
-import { getAuth, GoogleAuthProvider, signInWithPopup } from 'firebase/auth';
 import { Client, Loan } from '../types';
-import firebaseConfig from '../../firebase-applet-config.json';
 
-// Initialize Firebase
-const app = initializeApp(firebaseConfig);
+// Disconnected stubs for auth (not used)
+export const db = null;
+export const auth = null;
+export const googleProvider = null;
+export const signInWithPopup = async () => {};
 
-// Initialize Auth
-export const auth = getAuth(app);
-export const googleProvider = new GoogleAuthProvider();
-googleProvider.addScope('https://www.googleapis.com/auth/gmail.send');
-
-export { signInWithPopup, GoogleAuthProvider };
-
-// Initialize Firestore with database ID from config
-export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
-
-// Helper to sanitize client objects so no undefined/NaN fields cause Firestore setDoc failures
+// Helper to sanitize client objects
 export function sanitizeClient(client: Client): Client {
   if (!client) {
     return {
@@ -81,138 +70,25 @@ export function sanitizeClient(client: Client): Client {
   };
 }
 
-// CRITICAL CONSTRAINT: When the application initially boots, call getFromServer to test the connection.
-async function testConnection() {
-  try {
-    await getDocFromServer(doc(db, 'test', 'connection'));
-    console.log("Firestore connection test completed successfully.");
-  } catch (error) {
-    if (error instanceof Error && error.message.includes('the client is offline')) {
-      console.warn("Firestore connection check: offline mode active or connection pending.");
-    } else {
-      console.warn("Firestore connection check warning/offline mode active:", error);
-    }
-  }
-}
-testConnection();
-
-const CLIENTS_COLLECTION = 'clients';
-
-export enum OperationType {
-  CREATE = 'create',
-  UPDATE = 'update',
-  DELETE = 'delete',
-  LIST = 'list',
-  GET = 'get',
-  WRITE = 'write',
-}
-
-export interface FirestoreErrorInfo {
-  error: string;
-  operationType: OperationType;
-  path: string | null;
-}
-
-export function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null): never {
-  const errorMessage = error instanceof Error ? error.message : String(error);
-  
-  const errInfo: FirestoreErrorInfo = {
-    error: errorMessage,
-    operationType,
-    path
-  };
-  
-  console.error('Firestore Error Details:', JSON.stringify(errInfo, null, 2));
-  throw new Error(JSON.stringify(errInfo));
-}
-
-// Fetch all clients from Firestore.
+// Local stubs
 export async function fetchClientsFromFirebase(): Promise<Client[]> {
-  try {
-    const querySnapshot = await getDocs(collection(db, CLIENTS_COLLECTION));
-    const clients: Client[] = [];
-    querySnapshot.forEach((doc) => {
-      clients.push(sanitizeClient(doc.data() as Client));
-    });
-    return clients;
-  } catch (error) {
-    handleFirestoreError(error, OperationType.GET, CLIENTS_COLLECTION);
-  }
+  return [];
 }
 
-// Seed initial clients to Firebase
-export async function seedClientsToFirebase(initialClients: Client[]): Promise<void> {
-  try {
-    if (initialClients.length === 0) return;
-    const batch = writeBatch(db);
-    initialClients.forEach((client) => {
-      const cleanClient = sanitizeClient(client);
-      const docRef = doc(db, CLIENTS_COLLECTION, cleanClient.cedula);
-      batch.set(docRef, cleanClient);
-    });
-    await batch.commit();
-    console.log('Successfully seeded clients to Firebase!');
-  } catch (error) {
-    handleFirestoreError(error, OperationType.WRITE, CLIENTS_COLLECTION);
-  }
+export async function seedClientsToFirebase(): Promise<void> {}
+
+export async function saveClientToFirebase(): Promise<void> {}
+
+export async function deleteClientFromFirebase(): Promise<void> {}
+
+export async function syncAllClientsToFirebase(): Promise<void> {}
+
+export function subscribeToClients(
+  _onUpdate: (clients: Client[]) => void,
+  _onError?: (error: Error) => void
+) {
+  return () => {};
 }
 
-// Save or update a single client in Firebase
-export async function saveClientToFirebase(client: Client): Promise<void> {
-  try {
-    const cleanClient = sanitizeClient(client);
-    const docRef = doc(db, CLIENTS_COLLECTION, cleanClient.cedula);
-    await setDoc(docRef, cleanClient);
-    console.log(`Saved client ${cleanClient.nombre} to Firebase`);
-  } catch (error) {
-    handleFirestoreError(error, OperationType.WRITE, `${CLIENTS_COLLECTION}/${client.cedula}`);
-  }
-}
 
-// Delete a client from Firebase
-export async function deleteClientFromFirebase(cedula: string): Promise<void> {
-  try {
-    const docRef = doc(db, CLIENTS_COLLECTION, cedula);
-    await deleteDoc(docRef);
-    console.log(`Deleted client with cedula ${cedula} from Firebase`);
-  } catch (error) {
-    handleFirestoreError(error, OperationType.DELETE, `${CLIENTS_COLLECTION}/${cedula}`);
-  }
-}
 
-// Bulk sync all clients to Firebase (useful for migration or full reset)
-export async function syncAllClientsToFirebase(clients: Client[]): Promise<void> {
-  try {
-    const batch = writeBatch(db);
-    clients.forEach((client) => {
-      const cleanClient = sanitizeClient(client);
-      const docRef = doc(db, CLIENTS_COLLECTION, cleanClient.cedula);
-      batch.set(docRef, cleanClient);
-    });
-    await batch.commit();
-    console.log('Successfully synchronized all clients to Firebase!');
-  } catch (error) {
-    handleFirestoreError(error, OperationType.WRITE, CLIENTS_COLLECTION);
-  }
-}
-
-// Live real-time subscription for reactive changes
-export function subscribeToClients(onUpdate: (clients: Client[]) => void, onError: (error: Error) => void) {
-  const q = collection(db, CLIENTS_COLLECTION);
-  return onSnapshot(q, (querySnapshot) => {
-    const clientsList: Client[] = [];
-    const testCedulas = ['12345', '98765', '11111'];
-    querySnapshot.forEach((docSnap) => {
-      const data = docSnap.data() as Client;
-      if (!testCedulas.includes(data.cedula)) {
-        clientsList.push(sanitizeClient(data));
-      } else {
-        deleteClientFromFirebase(data.cedula).catch(err => console.error('Error deleting test client:', err));
-      }
-    });
-    onUpdate(clientsList);
-  }, (error) => {
-    console.error('Snapshot error:', error);
-    onError(error);
-  });
-}

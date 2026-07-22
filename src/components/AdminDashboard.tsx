@@ -41,12 +41,14 @@ import {
   ShieldCheck,
   Trash2,
   RefreshCw,
-  Menu
+  Menu,
+  Database
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { Client, Loan, Installment } from '../types';
 import { generateAmortizationSchedule, formatCurrency, saveDatabase, parseNumericInput } from '../utils';
 import { sendPushNotification } from '../App';
+import { SupabaseConfigModal } from './SupabaseConfigModal';
 import {
   ResponsiveContainer,
   PieChart,
@@ -81,6 +83,7 @@ export default function AdminDashboard({
     return false;
   });
   const [activeTab, setActiveTab] = useState<'kpis' | 'management' | 'calendar' | 'notifications'>('kpis');
+  const [supabaseModalOpen, setSupabaseModalOpen] = useState(false);
 
   // Notification panel states
   const [notifTitle, setNotifTitle] = useState('');
@@ -453,11 +456,11 @@ export default function AdminDashboard({
       notificaciones: [],
     };
 
-    const updatedClients = [...clients, addedClient];
+    const updatedClients = [addedClient, ...clients];
     setClients(updatedClients);
     saveDatabase(updatedClients);
 
-    // Reset Form
+    // Reset Form and filters so new client is immediately visible in Gestión de Cartera
     setNewClient({
       cedula: '',
       nombre: '',
@@ -473,8 +476,10 @@ export default function AdminDashboard({
       fechaInicio: new Date().toISOString().split('T')[0],
       estadoInicial: 'vigente',
     });
+    setSearchQuery('');
+    setStatusFilter('todos');
     setShowAddForm(false);
-    triggerAlert('success', `Afiliado ${addedClient.nombre} registrado correctamente.`);
+    triggerAlert('success', `Afiliado ${addedClient.nombre} registrado e inicializado correctamente.`);
   };
 
   const handleUpdateClient = (e: React.FormEvent) => {
@@ -1560,19 +1565,27 @@ export default function AdminDashboard({
                 : 'Notificaciones Masivas y Personalizadas'}
             </h2>
             <div className="flex items-center pl-1 shrink-0" id="db-connection-status-wrapper">
-              <span className="relative flex h-2.5 w-2.5" title={syncError ? 'Base de datos offline' : 'Base de datos conectada'}>
-                {syncError ? (
-                  <>
-                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75"></span>
-                    <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-rose-500 shadow-[0_0_8px_rgba(244,63,94,0.7)]"></span>
-                  </>
-                ) : (
-                  <>
-                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                    <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.7)]"></span>
-                  </>
-                )}
-              </span>
+              <button
+                type="button"
+                onClick={() => setSupabaseModalOpen(true)}
+                className="flex items-center gap-1.5 px-2.5 py-1 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-full cursor-pointer transition-all text-[11px] font-semibold text-slate-700"
+                title="Haz clic para comprobar o configurar la conexión a Supabase"
+              >
+                <span className="relative flex h-2 w-2">
+                  {syncError ? (
+                    <>
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75"></span>
+                      <span className="relative inline-flex rounded-full h-2 w-2 bg-rose-500 shadow-[0_0_8px_rgba(244,63,94,0.7)]"></span>
+                    </>
+                  ) : (
+                    <>
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                      <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.7)]"></span>
+                    </>
+                  )}
+                </span>
+                <span className="hidden sm:inline">Supabase</span>
+              </button>
             </div>
           </div>
 
@@ -3794,6 +3807,11 @@ export default function AdminDashboard({
             </div>
           )}
         </AnimatePresence>
+
+        <SupabaseConfigModal
+          isOpen={supabaseModalOpen}
+          onClose={() => setSupabaseModalOpen(false)}
+        />
       </main>
     </div>
   );

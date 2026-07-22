@@ -6,7 +6,13 @@
 import React, { useState, useEffect } from 'react';
 import { Client, UserSession } from './types';
 import { getDatabase, saveDatabase } from './utils';
-import { fetchClientsFromFirebase, saveClientToFirebase, deleteClientFromFirebase, subscribeToClients } from './lib/firebase';
+import {
+  isSupabaseConfigured,
+  subscribeToClientsSupabase,
+  saveClientToSupabase,
+  deleteClientFromSupabase,
+  seedClientsToSupabase,
+} from './lib/supabase';
 import CosmicBackground from './components/CosmicBackground';
 import LoginView from './components/LoginView';
 import AdminDashboard from './components/AdminDashboard';
@@ -38,11 +44,35 @@ export default function App() {
   const [syncError, setSyncError] = useState<string | null>(null);
   const [prevClientData, setPrevClientData] = useState<Client | null>(null);
 
-  // Initialize data and real-time subscription on mount
+  // Initialize data on mount
   useEffect(() => {
-    // Immediate load from local storage cache
+    // Load local storage database
     const cachedDb = getDatabase();
     setClients(cachedDb);
+
+    // If Supabase is configured, setup subscription
+    let unsubscribe = () => {};
+    if (isSupabaseConfigured()) {
+      unsubscribe = subscribeToClientsSupabase(
+        (supabaseDb) => {
+          if (supabaseDb.length === 0 && cachedDb.length > 0) {
+            // Seed initial clients to empty Supabase database
+            seedClientsToSupabase(cachedDb).catch(() => {});
+          } else if (supabaseDb.length > 0) {
+            setClients(supabaseDb);
+            saveDatabase(supabaseDb);
+          }
+          setSyncError(null);
+          setLoading(false);
+        },
+        () => {
+          setSyncError('Error de conexión con Supabase');
+          setLoading(false);
+        }
+      );
+    } else {
+      setLoading(false);
+    }
 
     // Register Service Worker for push notifications
     if ('serviceWorker' in navigator) {
@@ -51,55 +81,25 @@ export default function App() {
           .then((reg) => {
             console.log('Service Worker registrado con éxito:', reg.scope);
           })
-          .catch((err) => {
-            console.error('Error al registrar Service Worker:', err);
-          });
+          .catch(() => {});
       });
     }
-
-    // Live subscription to Firestore database
-    const unsubscribe = subscribeToClients(
-      (firebaseDb) => {
-        // Merge firebaseDb with local cached DB to ensure no newly created local client is lost if snapshot triggers before write completes
-        const localDb = getDatabase();
-        const firebaseMap = new Map(firebaseDb.map((c) => [c.cedula, c]));
-        const merged: Client[] = [...firebaseDb];
-
-        for (const localClient of localDb) {
-          if (!firebaseMap.has(localClient.cedula)) {
-            merged.push(localClient);
-            // Background push local client to Firebase
-            saveClientToFirebase(localClient).catch((err) => console.error('Syncing local client error:', err));
-          }
-        }
-
-        setClients(merged);
-        saveDatabase(merged);
-        setSyncError(null);
-        setLoading(false);
-      },
-      (error) => {
-        console.error('Failed to subscribe to Firestore. Using local cache fallback.', error);
-        setLoading(false);
-      }
-    );
 
     // Retrieve previous session if any
     const savedSession = localStorage.getItem('crediulep_session');
     if (savedSession) {
       try {
         setSession(JSON.parse(savedSession));
-      } catch (e) {
-        console.error('Error parsing cached session', e);
+      } catch {
+        // Quiet fallback
       }
     }
 
     return () => {
-      if (unsubscribe) {
-        unsubscribe();
-      }
+      unsubscribe();
     };
   }, []);
+
 
   // Track updates in logged-in client data to trigger push notifications
   useEffect(() => {
@@ -165,43 +165,41 @@ export default function App() {
     setPrevClientData(JSON.parse(JSON.stringify(currentClient)));
   }, [clients, session]);
 
-  // Sync state database changes back to utils & Firebase
+  // Sync state database changes back to local storage & Supabase
   const handleSetClients = (updater: React.SetStateAction<Client[]>) => {
     setClients((prev) => {
       const next = typeof updater === 'function' ? updater(prev) : updater;
       saveDatabase(next);
-      
-      // Safely perform targeted Firestore updates in the background
-      setTimeout(async () => {
-        try {
-          const prevMap = new Map(prev.map(c => [c.cedula, c]));
-          const nextMap = new Map(next.map(c => [c.cedula, c]));
 
-          // 1. Save new or modified clients
-          const savePromises = next.map(async (nextClient) => {
-            const prevClient = prevMap.get(nextClient.cedula);
-            if (!prevClient || JSON.stringify(prevClient) !== JSON.stringify(nextClient)) {
-              console.log(`[Smart Sync] Saving updated/new client: ${nextClient.nombre} (${nextClient.cedula})`);
-              await saveClientToFirebase(nextClient);
-            }
-          });
+      if (isSupabaseConfigured()) {
+        setTimeout(async () => {
+          try {
+            const prevMap = new Map(prev.map((c) => [c.cedula, c]));
+            const nextMap = new Map(next.map((c) => [c.cedula, c]));
 
-          // 2. Delete removed clients
-          const deletePromises = prev.map(async (prevClient) => {
-            if (!nextMap.has(prevClient.cedula)) {
-              console.log(`[Smart Sync] Deleting client: ${prevClient.nombre} (${prevClient.cedula})`);
-              await deleteClientFromFirebase(prevClient.cedula);
-            }
-          });
+            // Save modified or new clients
+            const savePromises = next.map(async (nextClient) => {
+              const prevClient = prevMap.get(nextClient.cedula);
+              if (!prevClient || JSON.stringify(prevClient) !== JSON.stringify(nextClient)) {
+                await saveClientToSupabase(nextClient);
+              }
+            });
 
-          await Promise.allSettled([...savePromises, ...deletePromises]);
-          setSyncError(null);
-        } catch (error) {
-          console.error('[Smart Sync] Error syncing changes to Firebase:', error);
-          setSyncError('no se copian en base de datos');
-        }
-      }, 0);
-      
+            // Delete removed clients
+            const deletePromises = prev.map(async (prevClient) => {
+              if (!nextMap.has(prevClient.cedula)) {
+                await deleteClientFromSupabase(prevClient.cedula);
+              }
+            });
+
+            await Promise.allSettled([...savePromises, ...deletePromises]);
+            setSyncError(null);
+          } catch {
+            // Quiet fallback
+          }
+        }, 0);
+      }
+
       return next;
     });
   };
