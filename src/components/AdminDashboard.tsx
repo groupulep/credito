@@ -124,6 +124,7 @@ export default function AdminDashboard({
     direccion: '',
     banco: '',
     numeroCuenta: '',
+    montoMaximo: '10000000',
     // Loan terms
     monto: '5000000',
     tasa: '2.0',
@@ -151,6 +152,8 @@ export default function AdminDashboard({
   const [editPlazo, setEditPlazo] = useState('');
   const [editFechaInicio, setEditFechaInicio] = useState('');
   const [editEstadoLoan, setEditEstadoLoan] = useState<'vigente' | 'atrasado' | 'cancelado'>('vigente');
+  const [editMontoMaximo, setEditMontoMaximo] = useState('');
+  const [clientToDelete, setClientToDelete] = useState<Client | null>(null);
 
   // --- Calendar states & helper logic ---
   const [currentDate, setCurrentDate] = useState(() => new Date());
@@ -441,6 +444,7 @@ export default function AdminDashboard({
       prestamo: newLoan,
       banco: newClient.banco.trim() || 'No especificado',
       numeroCuenta: newClient.numeroCuenta.trim() || 'No registrada',
+      montoMaximo: parseFloat(newClient.montoMaximo) || 10000000,
     };
 
     const updatedClients = [...clients, addedClient];
@@ -456,6 +460,7 @@ export default function AdminDashboard({
       direccion: '',
       banco: '',
       numeroCuenta: '',
+      montoMaximo: '10000000',
       monto: '5000000',
       tasa: '2.0',
       plazo: '12',
@@ -547,6 +552,7 @@ export default function AdminDashboard({
         prestamo: updatedLoan,
         banco: editBanco.trim(),
         numeroCuenta: editNumeroCuenta.trim(),
+        montoMaximo: parseFloat(editMontoMaximo) || 10000000,
       };
     });
 
@@ -554,6 +560,25 @@ export default function AdminDashboard({
     saveDatabase(updatedClients);
     setEditingClient(null);
     triggerAlert('success', `Datos de ${newNombreVal} actualizados correctamente.`);
+  };
+
+  // Delete a single user
+  const handleDeleteSingleClient = (targetCedula: string) => {
+    const target = clients.find((c) => c.cedula === targetCedula);
+    const updatedClients = clients.filter((c) => c.cedula !== targetCedula);
+
+    setClients(updatedClients);
+    saveDatabase(updatedClients);
+
+    setClientToDelete(null);
+    if (editingClient?.cedula === targetCedula) {
+      setEditingClient(null);
+    }
+    if (selectedClient?.cedula === targetCedula) {
+      setSelectedClient(null);
+    }
+
+    triggerAlert('success', `Usuario ${target?.nombre || targetCedula} eliminado correctamente.`);
   };
 
   // Simulate installment collection (Registro pagado)
@@ -2106,6 +2131,20 @@ export default function AdminDashboard({
                             />
                           </div>
                         </div>
+
+                        <div className="space-y-1">
+                          <label className="text-xs font-bold text-slate-500">Monto Máximo de Crédito (Cupo Pre-Aprobado)</label>
+                          <input
+                            type="number"
+                            required
+                            min="100000"
+                            step="100000"
+                            placeholder="Ej: 10000000"
+                            value={newClient.montoMaximo}
+                            onChange={(e) => setNewClient({ ...newClient, montoMaximo: e.target.value })}
+                            className="w-full bg-slate-50 border border-slate-200 focus:border-purple-500 focus:ring-1 focus:ring-purple-500/20 rounded-xl px-3.5 py-2.5 text-sm outline-none transition-all font-semibold font-mono"
+                          />
+                        </div>
                       </div>
 
                       {/* Section 2: Credit Terms */}
@@ -2288,6 +2327,9 @@ export default function AdminDashboard({
                               <td className="py-4 px-6">
                                 <p className="text-sm font-bold text-slate-800">{client.nombre}</p>
                                 <p className="text-xs text-slate-400">CC {client.cedula}</p>
+                                <p className="text-[10px] text-emerald-600 font-bold mt-1 uppercase tracking-wider">
+                                  Cupo Máx: {formatCurrency(client.montoMaximo ?? 10000000)}
+                                </p>
                               </td>
 
                               {/* Contact */}
@@ -2399,6 +2441,7 @@ export default function AdminDashboard({
                                     setEditBanco(client.banco || '');
                                     setEditNumeroCuenta(client.numeroCuenta || '');
                                     setEditContrasena(client.contrasena || client.cedula);
+                                    setEditMontoMaximo(client.montoMaximo ? client.montoMaximo.toString() : '10000000');
                                     setEditHasLoan(!!client.prestamo);
                                     if (client.prestamo) {
                                       setEditMonto(client.prestamo.montoOriginal.toString());
@@ -2428,6 +2471,15 @@ export default function AdminDashboard({
                                 >
                                   <Clock className="w-4 h-4" />
                                   <span className="hidden lg:inline-block">Plan pagos</span>
+                                </button>
+
+                                <button
+                                  onClick={() => setClientToDelete(client)}
+                                  className="p-1.5 hover:bg-red-50 text-red-600 hover:text-red-700 rounded-lg transition-colors border border-transparent hover:border-red-100 inline-flex items-center gap-1.5 text-xs font-bold cursor-pointer"
+                                  title="Eliminar Usuario"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                  <span className="hidden lg:inline-block">Eliminar</span>
                                 </button>
                               </td>
                             </motion.tr>
@@ -3414,6 +3466,20 @@ export default function AdminDashboard({
                           />
                         </div>
 
+                        <div className="space-y-1 sm:col-span-2">
+                          <label className="text-xs font-bold text-slate-500">Monto Máximo de Crédito (Cupo Pre-Aprobado)</label>
+                          <input
+                            type="number"
+                            required
+                            min="100000"
+                            step="100000"
+                            placeholder="Ej: 10000000"
+                            value={editMontoMaximo}
+                            onChange={(e) => setEditMontoMaximo(e.target.value)}
+                            className="w-full bg-slate-50 border border-slate-200 focus:border-purple-500 focus:ring-1 focus:ring-purple-500/20 rounded-xl px-3.5 py-2 text-sm outline-none transition-all font-semibold font-mono"
+                          />
+                        </div>
+
                         <div className="space-y-1 sm:col-span-2 bg-purple-50/30 p-3.5 rounded-2xl border border-purple-100/50">
                           <div className="flex items-center gap-1.5 text-xs font-bold text-purple-700 tracking-wider uppercase mb-2">
                             <KeyRound className="w-3.5 h-3.5" />
@@ -3535,20 +3601,35 @@ export default function AdminDashboard({
                   </div>
 
                   {/* Modal Footer */}
-                  <div className="p-6 border-t border-slate-100 bg-slate-50 flex items-center justify-end gap-3">
+                  <div className="p-6 border-t border-slate-100 bg-slate-50 flex items-center justify-between gap-3">
                     <button
                       type="button"
-                      onClick={() => setEditingClient(null)}
-                      className="bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold py-2.5 px-5 rounded-xl transition-all text-sm cursor-pointer"
+                      onClick={() => {
+                        const target = editingClient;
+                        setEditingClient(null);
+                        setClientToDelete(target);
+                      }}
+                      className="bg-red-50 hover:bg-red-100 text-red-600 border border-red-200/80 font-bold py-2.5 px-4 rounded-xl transition-all text-xs cursor-pointer flex items-center gap-1.5"
                     >
-                      Cancelar
+                      <Trash2 className="w-4 h-4" />
+                      <span>Eliminar Usuario</span>
                     </button>
-                    <button
-                      type="submit"
-                      className="bg-purple-600 hover:bg-purple-700 text-white font-bold py-2.5 px-5 rounded-xl shadow-lg shadow-purple-500/15 transition-all text-sm cursor-pointer"
-                    >
-                      Guardar Cambios
-                    </button>
+
+                    <div className="flex items-center gap-3">
+                      <button
+                        type="button"
+                        onClick={() => setEditingClient(null)}
+                        className="bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold py-2.5 px-5 rounded-xl transition-all text-sm cursor-pointer"
+                      >
+                        Cancelar
+                      </button>
+                      <button
+                        type="submit"
+                        className="bg-purple-600 hover:bg-purple-700 text-white font-bold py-2.5 px-5 rounded-xl shadow-lg shadow-purple-500/15 transition-all text-sm cursor-pointer"
+                      >
+                        Guardar Cambios
+                      </button>
+                    </div>
                   </div>
                 </form>
               </motion.div>
@@ -3637,6 +3718,70 @@ export default function AdminDashboard({
                   >
                     <Trash2 className="w-3.5 h-3.5" />
                     <span>Eliminar y Descargar Respaldo</span>
+                  </button>
+                </div>
+              </motion.div>
+            </div>
+          )}
+        </AnimatePresence>
+
+        {/* --- MODAL DE CONFIRMACIÓN PARA ELIMINAR UN USUARIO INDIVIDUAL --- */}
+        <AnimatePresence>
+          {clientToDelete && (
+            <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-[60]">
+              <motion.div
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.95 }}
+                className="bg-white rounded-3xl shadow-2xl w-full max-w-md overflow-hidden flex flex-col"
+              >
+                {/* Header */}
+                <div className="p-6 border-b border-slate-100 flex items-center gap-3 bg-red-50">
+                  <div className="p-2.5 bg-red-100 text-red-600 rounded-2xl shrink-0">
+                    <Trash2 className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-extrabold text-slate-900">
+                      Eliminar Afiliado
+                    </h3>
+                    <p className="text-xs text-slate-500 font-medium">
+                      Esta acción eliminará al usuario permanentemente.
+                    </p>
+                  </div>
+                </div>
+
+                {/* Body */}
+                <div className="p-6 space-y-3">
+                  <p className="text-sm text-slate-700 leading-relaxed font-medium">
+                    ¿Estás seguro de que deseas eliminar a <strong className="text-slate-900 font-bold">{clientToDelete.nombre}</strong> (C.C. <span className="font-mono text-slate-600">{clientToDelete.cedula}</span>)?
+                  </p>
+
+                  {clientToDelete.prestamo && (
+                    <div className="p-3 bg-amber-50 border border-amber-200/80 rounded-xl text-xs text-amber-800 font-medium flex items-start gap-2">
+                      <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                      <p>
+                        Este usuario tiene un préstamo asociado. Al eliminarlo se borrarán también todos sus datos de crédito y cuotas.
+                      </p>
+                    </div>
+                  )}
+                </div>
+
+                {/* Footer */}
+                <div className="p-4 border-t border-slate-100 bg-slate-50 flex items-center justify-end gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setClientToDelete(null)}
+                    className="bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold py-2 px-4 rounded-xl transition-all text-xs cursor-pointer"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleDeleteSingleClient(clientToDelete.cedula)}
+                    className="bg-red-600 hover:bg-red-700 text-white font-bold py-2.5 px-4 rounded-xl shadow-md shadow-red-600/15 transition-all text-xs cursor-pointer flex items-center gap-1.5"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                    <span>Eliminar Usuario</span>
                   </button>
                 </div>
               </motion.div>

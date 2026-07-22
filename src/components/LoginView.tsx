@@ -263,28 +263,42 @@ Autorizo el tratamiento de mis datos personales (Habeas Data) para el proceso de
             </div>
 
             {/* Premium segmented control */}
-            <div className="bg-slate-100 p-1 rounded-2xl flex gap-1 border border-slate-100 shadow-inner">
+            <div className="bg-slate-100 p-1 rounded-2xl flex gap-1 border border-slate-100 shadow-inner relative">
               <button
                 type="button"
                 onClick={() => { setActiveMode('login'); setError(null); }}
-                className={`flex-1 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                className={`relative flex-1 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer z-10 ${
                   activeMode === 'login'
-                    ? 'bg-white text-purple-700 shadow-sm border border-purple-50/10'
+                    ? 'text-purple-700 font-extrabold'
                     : 'text-slate-500 hover:text-slate-800'
                 }`}
               >
+                {activeMode === 'login' && (
+                  <motion.div
+                    layoutId="activeLoginTab"
+                    className="absolute inset-0 bg-white rounded-xl shadow-sm border border-purple-50/10 -z-10"
+                    transition={{ type: "spring", stiffness: 380, damping: 30 }}
+                  />
+                )}
                 <LogIn className="w-4 h-4" />
                 <span>Ingresar</span>
               </button>
               <button
                 type="button"
                 onClick={() => { setActiveMode('register'); setError(null); }}
-                className={`flex-1 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                className={`relative flex-1 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer z-10 ${
                   activeMode === 'register'
-                    ? 'bg-white text-purple-700 shadow-sm border border-purple-50/10'
+                    ? 'text-purple-700 font-extrabold'
                     : 'text-slate-500 hover:text-slate-800'
                 }`}
               >
+                {activeMode === 'register' && (
+                  <motion.div
+                    layoutId="activeLoginTab"
+                    className="absolute inset-0 bg-white rounded-xl shadow-sm border border-purple-50/10 -z-10"
+                    transition={{ type: "spring", stiffness: 380, damping: 30 }}
+                  />
+                )}
                 <UserPlus className="w-4 h-4" />
                 <span>Registrarme</span>
               </button>

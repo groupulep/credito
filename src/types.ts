@@ -52,6 +52,7 @@ export interface Client {
   numeroCuenta?: string;
   mensajes?: Message[];
   notificaciones?: NotificationItem[];
+  montoMaximo?: number;
 }
 
 export type UserRole = 'admin' | 'client';

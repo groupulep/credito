@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   CheckCircle2,
@@ -27,11 +27,16 @@ import {
   User,
   Landmark,
   ShieldCheck,
-  Bell
+  Bell,
+  ChevronDown,
+  CreditCard,
+  Wifi,
+  KeyRound,
+  Lock,
+  ShieldAlert
 } from 'lucide-react';
 import { Client, UserSession, Installment, Message } from '../types';
 import { formatCurrency, saveDatabase } from '../utils';
-import { sendPushNotification } from '../App';
 
 interface ClientDashboardProps {
   session: UserSession;
@@ -48,13 +53,93 @@ export default function ClientDashboard({ session, clients, setClients, onLogout
   }, [clients, session]);
 
   const [requestedAmount, setRequestedAmount] = useState<number>(2000000); // Default to $2,000,000 COP
+  const [activeTab, setActiveTab] = useState<'summary' | 'schedule' | 'simulator'>('summary');
   const [paymentFilter, setPaymentFilter] = useState<'all' | 'pending' | 'paid'>('all');
-  const [showProfile, setShowProfile] = useState<boolean>(false);
+  const [showUserDropdown, setShowUserDropdown] = useState<boolean>(false);
+  const [dropdownTab, setDropdownTab] = useState<'profile' | 'notifications'>('profile');
   const [typedMessage, setTypedMessage] = useState('');
-  const [notificationStatus, setNotificationStatus] = useState<NotificationPermission>(
-    'Notification' in window ? Notification.permission : 'default'
-  );
-  const [testFeedback, setTestFeedback] = useState<string | null>(null);
+
+  // Password change and first-time announcement states
+  const [showPasswordChangeModal, setShowPasswordChangeModal] = useState(false);
+  const [showFirstTimeAd, setShowFirstTimeAd] = useState(false);
+  const [currentPasswordInput, setCurrentPasswordInput] = useState('');
+  const [newPasswordInput, setNewPasswordInput] = useState('');
+  const [confirmPasswordInput, setConfirmPasswordInput] = useState('');
+  const [passwordChangeError, setPasswordChangeError] = useState<string | null>(null);
+  const [passwordChangeSuccess, setPasswordChangeSuccess] = useState(false);
+
+  useEffect(() => {
+    if (clientData && clientData.montoMaximo && requestedAmount > clientData.montoMaximo) {
+      setRequestedAmount(clientData.montoMaximo);
+    }
+  }, [clientData, requestedAmount]);
+
+  useEffect(() => {
+    if (clientData && clientData.contrasena === clientData.cedula) {
+      const hasSeen = sessionStorage.getItem(`seen_pw_ad_${clientData.cedula}`);
+      if (!hasSeen) {
+        setShowFirstTimeAd(true);
+      }
+    }
+  }, [clientData]);
+
+  const handlePasswordChangeSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    setPasswordChangeError(null);
+    setPasswordChangeSuccess(false);
+
+    if (!clientData) return;
+
+    if (currentPasswordInput !== clientData.contrasena) {
+      setPasswordChangeError('La contraseña actual es incorrecta.');
+      return;
+    }
+
+    if (newPasswordInput.trim().length < 4) {
+      setPasswordChangeError('La nueva contraseña debe tener al menos 4 caracteres.');
+      return;
+    }
+
+    if (newPasswordInput === clientData.cedula) {
+      setPasswordChangeError('La nueva contraseña no puede ser tu número de cédula por motivos de seguridad.');
+      return;
+    }
+
+    if (newPasswordInput !== confirmPasswordInput) {
+      setPasswordChangeError('La confirmación de la contraseña no coincide.');
+      return;
+    }
+
+    // Success! Update password in the clients list
+    const updatedClients = clients.map((c) => {
+      if (c.cedula === clientData.cedula) {
+        return {
+          ...c,
+          contrasena: newPasswordInput.trim(),
+        };
+      }
+      return c;
+    });
+
+    setClients(updatedClients);
+    saveDatabase(updatedClients);
+
+    setPasswordChangeSuccess(true);
+    setCurrentPasswordInput('');
+    setNewPasswordInput('');
+    setConfirmPasswordInput('');
+
+    // Auto close modal after 2.5 seconds
+    setTimeout(() => {
+      setShowPasswordChangeModal(false);
+      setPasswordChangeSuccess(false);
+    }, 2500);
+  };
+
+  const unreadCount = useMemo(() => {
+    if (!clientData || !clientData.notificaciones) return 0;
+    return clientData.notificaciones.filter(n => !n.leido).length;
+  }, [clientData]);
 
   const initials = useMemo(() => {
     if (!clientData) return 'C';
@@ -205,6 +290,11 @@ export default function ClientDashboard({ session, clients, setClients, onLogout
   const openWhatsAppCreditRequest = (amount: number) => {
     if (!clientData) return;
 
+    // Safety check: if they have an active loan (not paz y salvo), they cannot request/simulate a new one
+    if (clientData.prestamo && clientData.prestamo.estado !== 'cancelado') {
+      return;
+    }
+
     const nombre = clientData.nombre;
     const cedula = clientData.cedula;
     const adminPhone = '573001234567'; // Default administrative number
@@ -213,38 +303,6 @@ export default function ClientDashboard({ session, clients, setClients, onLogout
 
     const url = `https://api.whatsapp.com/send?phone=${adminPhone}&text=${encodeURIComponent(text)}`;
     window.open(url, '_blank', 'noreferrer');
-  };
-
-  const requestNotificationPermission = async () => {
-    if (!('Notification' in window)) {
-      setTestFeedback('Este navegador no soporta notificaciones de escritorio.');
-      return;
-    }
-    try {
-      const permission = await Notification.requestPermission();
-      setNotificationStatus(permission);
-      if (permission === 'granted') {
-        sendPushNotification(
-          '¡Notificaciones Activas! 🔔',
-          'Recibirás notificaciones inmediatas sobre tu crédito y mensajes del administrador.'
-        );
-      }
-    } catch (e) {
-      console.error('Error requesting notification permission', e);
-    }
-  };
-
-  const handleTestNotification = () => {
-    if (notificationStatus !== 'granted') {
-      requestNotificationPermission();
-      return;
-    }
-    sendPushNotification(
-      'Prueba de Notificación Push 🚀',
-      '¡Tu Service Worker de CrediULEP está funcionando correctamente!'
-    );
-    setTestFeedback('¡Notificación de prueba enviada con éxito!');
-    setTimeout(() => setTestFeedback(null), 4000);
   };
 
   const handleSendMessage = () => {
@@ -290,6 +348,78 @@ export default function ClientDashboard({ session, clients, setClients, onLogout
     );
   }
 
+  const renderSimulator = () => {
+    return (
+      <div className="bg-white border border-purple-100 p-6 rounded-3xl shadow-sm space-y-6">
+        <div>
+          <h3 className="text-lg font-extrabold text-slate-900 tracking-tight">Simulador Financiero CrediULEP</h3>
+          <p className="text-xs text-slate-400">Ajusta el monto del desembolso para cotizar el plan de cuotas correspondiente</p>
+        </div>
+
+        {/* Slider Panel */}
+        <div className="p-6 bg-purple-50/30 rounded-2xl border border-purple-100/50 space-y-5">
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] font-black text-purple-700 uppercase tracking-widest">
+              Monto de Financiamiento
+            </span>
+            <span className="text-[10px] font-mono text-purple-600 font-bold bg-white px-2.5 py-1 rounded-lg border border-purple-100/60 shadow-sm">
+              Paso: $100K COP
+            </span>
+          </div>
+
+          <div className="text-center py-2 bg-white rounded-2xl border border-purple-100/30 shadow-inner">
+            <span className="text-3xl font-black text-slate-900 tracking-tight font-mono">
+              {formatCurrency(requestedAmount)}
+            </span>
+          </div>
+
+          <div className="space-y-1">
+            <input
+              type="range"
+              min="500000"
+              max={clientData?.montoMaximo || 10000000}
+              step="100000"
+              value={requestedAmount}
+              onChange={(e) => setRequestedAmount(Number(e.target.value))}
+              className="w-full h-2 bg-purple-100 rounded-lg appearance-none cursor-pointer accent-purple-600 focus:outline-none focus:ring-2 focus:ring-purple-500"
+              id="amount-slider-tab"
+            />
+            <div className="flex justify-between text-[10px] text-slate-400 font-bold font-mono">
+              <span>{formatCurrency(500000)}</span>
+              <span>{formatCurrency(clientData?.montoMaximo || 10000000)}</span>
+            </div>
+          </div>
+
+          <div className="pt-4 border-t border-dashed border-purple-200/60 flex items-center justify-between text-xs text-purple-950 font-bold">
+            <span className="opacity-80">Cuota Fija Mensual Estimada (12 meses):</span>
+            <span className="font-mono text-purple-700 text-sm font-black bg-white px-3 py-1.5 rounded-xl border border-purple-100/50 shadow-sm">
+              {formatCurrency(Math.round((requestedAmount * 1.18) / 12))} / mes
+            </span>
+          </div>
+        </div>
+
+        {/* Primary Solicitation Button */}
+        <motion.button
+          whileHover={{ scale: 1.02, translateY: -2 }}
+          whileTap={{ scale: 0.98 }}
+          onClick={() => openWhatsAppCreditRequest(requestedAmount)}
+          className="w-full flex items-center justify-between p-4 bg-gradient-to-r from-purple-600 to-purple-700 hover:from-purple-500 hover:to-purple-600 text-white rounded-2xl shadow-lg shadow-purple-500/10 transition-all text-left group cursor-pointer"
+        >
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-white/10 rounded-xl">
+              <Sparkles className="w-5 h-5 text-yellow-300 animate-pulse" />
+            </div>
+            <div>
+              <span className="block font-black text-sm">Desembolsar Crédito Simulado</span>
+              <span className="block text-[10px] text-purple-100">Envía tu propuesta de amortización por WhatsApp</span>
+            </div>
+          </div>
+          <ArrowUpRight className="w-5 h-5 text-white/90" />
+        </motion.button>
+      </div>
+    );
+  };
+
   const isPazYSalvo = !clientData.prestamo || clientData.prestamo.estado === 'cancelado';
 
   return (
@@ -298,12 +428,14 @@ export default function ClientDashboard({ session, clients, setClients, onLogout
       <nav className="bg-white border-b border-slate-100 shadow-sm sticky top-0 z-30" id="client-nav">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-purple-600 to-purple-800 flex items-center justify-center font-bold text-white shadow-md shadow-purple-500/25">
-              C
+            <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-purple-600 to-purple-800 flex items-center justify-center font-black text-white shadow-md shadow-purple-500/20 text-xs shrink-0">
+              {initials}
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <span className="font-extrabold text-lg text-slate-900 block leading-tight">CrediULEP</span>
+                <span className="font-extrabold text-sm sm:text-base text-slate-900 block leading-tight">
+                  ¡Hola, {clientData.nombre}!
+                </span>
                 <span className="relative flex h-2 w-2 mt-0.5" title={syncError ? 'Base de datos offline' : 'Base de datos conectada'} id="client-db-light">
                   {syncError ? (
                     <>
@@ -318,32 +450,288 @@ export default function ClientDashboard({ session, clients, setClients, onLogout
                   )}
                 </span>
               </div>
-              <span className="text-[10px] text-purple-600 font-bold uppercase tracking-wider">Portal Afiliados</span>
+              <span className="text-[9px] text-purple-600 font-bold uppercase tracking-wider block leading-none mt-0.5">Socio Certificado</span>
             </div>
           </div>
 
-          <div className="flex items-center gap-4">
-            <div className="hidden sm:flex items-center gap-2.5 text-right">
-              <div>
-                <span className="block text-sm font-bold text-slate-800">{clientData.nombre}</span>
-                <span className="block text-xs text-slate-400">ID: {clientData.cedula}</span>
-              </div>
-            </div>
+          <div className="flex items-center gap-3.5 relative">
+            {/* Standalone Notification Bell Button */}
             <button
-              onClick={onLogout}
-              className="flex items-center gap-2 px-4 py-2.5 bg-slate-50 hover:bg-red-50 text-slate-600 hover:text-red-600 font-bold text-xs rounded-xl transition-all border border-slate-100 hover:border-red-100 cursor-pointer"
-              id="client-logout-btn"
+              onClick={() => {
+                if (showUserDropdown && dropdownTab === 'notifications') {
+                  setShowUserDropdown(false);
+                } else {
+                  setShowUserDropdown(true);
+                  setDropdownTab('notifications');
+                }
+              }}
+              className="relative p-2.5 text-slate-400 hover:text-purple-600 hover:bg-slate-50 border border-slate-100 hover:border-slate-200 rounded-2xl transition-all cursor-pointer focus:outline-none flex items-center justify-center shrink-0"
+              title="Notificaciones"
+              id="client-notification-bell"
             >
-              <LogOut className="w-4 h-4" />
-              <span className="hidden sm:inline-block">Cerrar Sesión</span>
+              <Bell className="w-5 h-5" />
+              {unreadCount > 0 && (
+                <span className="absolute top-1.5 right-1.5 flex h-2.5 w-2.5">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-purple-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-purple-600"></span>
+                </span>
+              )}
             </button>
+
+            <button
+              onClick={() => {
+                if (showUserDropdown && dropdownTab === 'profile') {
+                  setShowUserDropdown(false);
+                } else {
+                  setShowUserDropdown(true);
+                  setDropdownTab('profile');
+                }
+              }}
+              className="flex items-center gap-2 px-3 py-1.5 hover:bg-slate-50 border border-slate-100 hover:border-slate-200 rounded-2xl transition-all text-left cursor-pointer focus:outline-none"
+              id="client-profile-dropdown-trigger"
+            >
+              <div className="relative">
+                <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-purple-600 to-indigo-600 flex items-center justify-center text-white shadow-md shadow-purple-500/10">
+                  <User className="w-4 h-4" />
+                </div>
+              </div>
+              <ChevronDown className={`w-3.5 h-3.5 text-slate-400 transition-transform duration-300 ${showUserDropdown && dropdownTab === 'profile' ? 'rotate-180 text-purple-600' : ''}`} />
+            </button>
+
+            {/* Floating Dropdown Panel */}
+            <AnimatePresence>
+              {showUserDropdown && (
+                <>
+                  {/* Backdrop with premium blur effect */}
+                  <motion.div 
+                     initial={{ opacity: 0 }}
+                     animate={{ opacity: 1 }}
+                     exit={{ opacity: 0 }}
+                     transition={{ duration: 0.2 }}
+                     className="fixed inset-0 bg-slate-900/25 backdrop-blur-sm z-40 cursor-default" 
+                     onClick={() => setShowUserDropdown(false)} 
+                  />
+                  
+                  <motion.div
+                    initial={{ opacity: 0, scale: 0.95, y: 10 }}
+                    animate={{ opacity: 1, scale: 1, y: 0 }}
+                    exit={{ opacity: 0, scale: 0.95, y: 10 }}
+                    transition={{ duration: 0.2, ease: "easeOut" }}
+                    className="absolute right-0 top-full mt-2 w-[340px] sm:w-[390px] bg-white border border-slate-100 rounded-3xl shadow-xl shadow-purple-100/40 overflow-hidden z-50 flex flex-col"
+                    id="client-dropdown-panel"
+                  >
+                    {dropdownTab === 'profile' ? (
+                      <>
+                        {/* Compact Profile Header */}
+                        <div className="p-4 border-b border-slate-100 bg-slate-50/50 flex items-center gap-3">
+                          <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-purple-600 to-indigo-600 flex items-center justify-center font-black text-sm text-white shadow-md shadow-purple-500/10">
+                            {initials}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <h3 className="text-xs font-black text-slate-800 leading-tight truncate">{clientData.nombre}</h3>
+                            <p className="text-[10px] text-slate-400 font-bold mt-0.5">C.C. {clientData.cedula}</p>
+                          </div>
+                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 bg-emerald-50 text-emerald-700 text-[9px] font-black rounded-full border border-emerald-100/50 uppercase tracking-wider shrink-0">
+                            <span className="h-1 w-1 rounded-full bg-emerald-500 animate-pulse" />
+                            Socio Activo
+                          </span>
+                        </div>
+
+                        {/* Content area */}
+                        <div className="p-4 max-h-[380px] overflow-y-auto custom-scrollbar">
+                          <div className="space-y-4">
+                            {/* Datos Personales Normales */}
+                            <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100 space-y-3">
+                              <div className="flex items-center justify-between border-b border-slate-150 pb-2">
+                                <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider">Identificación Personal</span>
+                                <span className="text-[9px] bg-purple-50 text-purple-700 font-extrabold px-2.5 py-0.5 rounded-md border border-purple-100 uppercase tracking-wider">
+                                  Miembro Activo
+                                </span>
+                              </div>
+                              <div className="space-y-2">
+                                <div className="flex justify-between items-center text-xs">
+                                  <span className="font-bold text-slate-500">Nombre Completo</span>
+                                  <span className="font-extrabold text-slate-800 text-right uppercase tracking-tight">{clientData.nombre}</span>
+                                </div>
+                                <div className="flex justify-between items-center text-xs">
+                                  <span className="font-bold text-slate-500">Documento</span>
+                                  <span className="font-mono font-extrabold text-slate-800 text-right">C.C. {clientData.cedula}</span>
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Personal and Bank accounts information list */}
+                            <div className="space-y-2.5 text-xs">
+                              <div className="bg-slate-50 p-3 rounded-xl border border-slate-100 space-y-2">
+                                <div className="flex items-center justify-between border-b border-slate-150 pb-1.5">
+                                  <span className="text-[9px] font-black text-slate-400 uppercase tracking-wider">Cuenta para Desembolsos</span>
+                                  <span className="text-[8px] bg-purple-50 text-purple-700 font-extrabold px-2 py-0.5 rounded border border-purple-100 uppercase">
+                                    {clientData.banco || 'N/A'}
+                                  </span>
+                                </div>
+                                <div className="flex justify-between items-center text-[11px]">
+                                  <span className="font-bold text-slate-500">Número de Cuenta</span>
+                                  <span className="font-mono font-extrabold text-slate-800">
+                                    {clientData.numeroCuenta || 'No registrada'}
+                                  </span>
+                                </div>
+                              </div>
+
+                              <div className="space-y-1.5 px-0.5">
+                                <div className="flex justify-between items-center py-1.5 border-b border-slate-100/50">
+                                  <div className="flex items-center gap-1.5 text-slate-400">
+                                    <Phone className="w-3.5 h-3.5 text-purple-500" />
+                                    <span className="font-bold">Celular</span>
+                                  </div>
+                                  <span className="font-bold text-slate-700 font-mono">{clientData.telefono}</span>
+                                </div>
+                                <div className="flex justify-between items-center py-1.5 border-b border-slate-100/50">
+                                  <div className="flex items-center gap-1.5 text-slate-400">
+                                    <Mail className="w-3.5 h-3.5 text-purple-500" />
+                                    <span className="font-bold">Correo</span>
+                                  </div>
+                                  <span className="font-bold text-slate-700 break-all text-right max-w-[180px] truncate" title={clientData.correo}>
+                                    {clientData.correo}
+                                  </span>
+                                </div>
+                                <div className="flex justify-between items-center py-1.5 border-b border-slate-100/50">
+                                  <div className="flex items-center gap-1.5 text-slate-400">
+                                    <MapPin className="w-3.5 h-3.5 text-purple-500" />
+                                    <span className="font-bold">Dirección</span>
+                                  </div>
+                                  <span className="font-semibold text-slate-600 text-right truncate max-w-[180px]" title={clientData.direccion}>
+                                    {clientData.direccion}
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Botón Cambiar Contraseña */}
+                            <div className="pt-2 border-t border-slate-200">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setShowUserDropdown(false);
+                                  setPasswordChangeError(null);
+                                  setPasswordChangeSuccess(false);
+                                  setCurrentPasswordInput('');
+                                  setNewPasswordInput('');
+                                  setConfirmPasswordInput('');
+                                  setShowPasswordChangeModal(true);
+                                }}
+                                className="w-full flex items-center justify-center gap-2 py-2 bg-purple-50 hover:bg-purple-100 text-purple-700 font-bold text-xs rounded-xl transition-all border border-purple-200/50 cursor-pointer active:scale-[0.98]"
+                              >
+                                <KeyRound className="w-4 h-4" />
+                                <span>Cambiar Contraseña</span>
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Footer logout button */}
+                        <div className="bg-slate-50 border-t border-slate-100 p-3 flex flex-col gap-2">
+                          <button
+                            onClick={() => {
+                              setShowUserDropdown(false);
+                              onLogout();
+                            }}
+                            className="w-full flex items-center justify-center gap-2 py-2 bg-white hover:bg-red-50 text-slate-600 hover:text-red-600 font-bold text-xs rounded-xl transition-all border border-slate-200 hover:border-red-150 cursor-pointer"
+                          >
+                            <LogOut className="w-4 h-4" />
+                            <span>Cerrar Sesión</span>
+                          </button>
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        {/* Compact Notification Header */}
+                        <div className="p-4 border-b border-slate-100 bg-slate-50/50 flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <Bell className="w-4 h-4 text-purple-600" />
+                            <h3 className="text-xs font-black text-slate-800 uppercase tracking-wider">Notificaciones</h3>
+                          </div>
+                          {unreadCount > 0 && (
+                            <span className="bg-purple-100 text-purple-800 text-[9px] font-black px-2.5 py-0.5 rounded-full">
+                              {unreadCount} nuevas
+                             </span>
+                          )}
+                        </div>
+
+                        {/* Content area */}
+                        <div className="p-4 max-h-[380px] overflow-y-auto custom-scrollbar">
+                          <div className="space-y-2.5">
+                            {(!clientData.notificaciones || clientData.notificaciones.length === 0) ? (
+                              <div className="bg-slate-50/50 p-6 rounded-xl text-center text-xs text-slate-400 font-medium italic border border-dashed border-slate-200">
+                                No tienes comunicados o alertas pendientes.
+                              </div>
+                            ) : (
+                              <div className="space-y-2">
+                                {clientData.notificaciones.map((notif) => (
+                                  <div
+                                    key={notif.id}
+                                    className={`p-3 rounded-xl border transition-all flex flex-col justify-between gap-2 text-[11px] ${
+                                      notif.leido 
+                                        ? 'bg-slate-50/50 border-slate-100 text-slate-500' 
+                                        : 'bg-purple-50/20 border-purple-100 text-slate-800 shadow-sm'
+                                    }`}
+                                  >
+                                    <div>
+                                      <div className="flex items-start justify-between gap-2 mb-1">
+                                        <div className="flex items-center gap-1">
+                                          {!notif.leido && (
+                                            <span className="h-1.5 w-1.5 rounded-full bg-purple-600 shrink-0 animate-pulse" />
+                                          )}
+                                          <h4 className="font-black tracking-tight leading-tight">{notif.titulo}</h4>
+                                        </div>
+                                        <span className="text-[8px] font-bold text-slate-400 shrink-0">
+                                          {new Date(notif.fecha).toLocaleDateString()}
+                                        </span>
+                                      </div>
+                                      <p className="font-medium leading-relaxed">{notif.mensaje}</p>
+                                    </div>
+                                    
+                                    {!notif.leido && (
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          const updatedClients = clients.map(c => {
+                                            if (c.cedula === clientData.cedula) {
+                                              return {
+                                                ...c,
+                                                notificaciones: (c.notificaciones || []).map(n => 
+                                                  n.id === notif.id ? { ...n, leido: true } : n
+                                                )
+                                              };
+                                            }
+                                            return c;
+                                          });
+                                          setClients(updatedClients);
+                                          saveDatabase(updatedClients);
+                                        }}
+                                        className="self-end text-[9px] font-black text-purple-750 hover:text-purple-800 cursor-pointer bg-purple-50 hover:bg-purple-100 px-2 py-1 rounded transition-all border border-purple-200/35"
+                                      >
+                                        Marcar como leída
+                                      </button>
+                                    )}
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </>
+                    )}
+                  </motion.div>
+                </>
+              )}
+            </AnimatePresence>
           </div>
         </div>
       </nav>
 
       {/* Main client workspace */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8" id="client-main">
-        {/* Welcome Jumbotron Card */}
+        {/* Welcome Jumbotron Card (now simple and clean brand banner) */}
         <motion.section
           initial={{ opacity: 0, y: 15 }}
           animate={{ opacity: 1, y: 0 }}
@@ -354,320 +742,37 @@ export default function ClientDashboard({ session, clients, setClients, onLogout
           <div className="absolute top-[-50%] left-[-20%] w-96 h-96 bg-purple-50/30 rounded-full blur-[100px] pointer-events-none" />
           <div className="absolute bottom-[-50%] right-[-10%] w-96 h-96 bg-violet-50/20 rounded-full blur-[100px] pointer-events-none" />
 
-          <div className="flex items-center gap-5 relative z-10">
-            {/* Initials Badge */}
-            <div className="w-16 h-16 md:w-20 md:h-20 rounded-2xl bg-gradient-to-tr from-purple-600 to-indigo-600 flex items-center justify-center font-black text-2xl md:text-3xl text-white shrink-0 shadow-md shadow-purple-500/25">
-              {initials}
+          {/* Left Side: CrediULEP Logo branding */}
+          <div className="flex items-center gap-4 relative z-10">
+            <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-purple-600 to-purple-800 flex items-center justify-center font-black text-white shrink-0 shadow-md shadow-purple-500/25">
+              <span className="text-xl">C</span>
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <span className="px-2.5 py-1 bg-purple-50 text-purple-700 border border-purple-100 rounded-lg text-[10px] font-bold uppercase tracking-wider">
-                  Socio Activo
-                </span>
-                <span className="text-purple-300 font-bold text-xs">•</span>
-                <span className="text-slate-500 font-medium text-xs">Cédula: {clientData.cedula}</span>
-              </div>
-              <h2 className="text-2xl md:text-3xl font-black text-slate-900 mt-1.5 leading-tight tracking-tight">
-                ¡Hola, {clientData.nombre}!
-              </h2>
-              <p className="text-slate-600 text-xs md:text-sm mt-1.5 font-medium">
-                {isPazYSalvo
-                  ? 'Te encuentras al día y a paz y salvo. ¡Sigue construyendo tu futuro con nosotros!'
-                  : 'Gracias por tu puntualidad. Revisa el estado de tu amortización interactiva abajo.'}
-              </p>
-            </div>
-          </div>
-
-          <div className="relative z-10 shrink-0 flex flex-col gap-1 items-start md:items-end">
-            <span className="text-[10px] font-bold text-purple-400 uppercase tracking-widest block">Contacto en Base de Datos</span>
-            <span className="text-sm font-bold text-purple-700 block">{clientData.correo}</span>
-            <span className="text-xs text-slate-500 block font-mono">Tel: {clientData.telefono}</span>
-            <button
-              onClick={() => setShowProfile(!showProfile)}
-              className={`mt-3 flex items-center gap-2 px-4 py-2 rounded-2xl text-xs font-bold transition-all border cursor-pointer ${
-                showProfile
-                  ? 'bg-purple-600 text-white border-purple-600 shadow-md shadow-purple-500/10'
-                  : 'bg-slate-50 hover:bg-purple-50 text-slate-700 hover:text-purple-700 border-slate-200 hover:border-purple-200'
-              }`}
-              id="toggle-profile-panel-btn"
-            >
-              <User className="w-4 h-4" />
-              <span>{showProfile ? 'Cerrar Perfil' : 'Ver Mi Perfil'}</span>
-            </button>
-          </div>
-        </motion.section>
-
-        {/* Panel de Perfil del Cliente */}
-        <AnimatePresence>
-          {showProfile && (
-            <motion.section
-              initial={{ opacity: 0, height: 0, y: -10 }}
-              animate={{ opacity: 1, height: 'auto', y: 0 }}
-              exit={{ opacity: 0, height: 0, y: -10 }}
-              transition={{ duration: 0.3, ease: "easeInOut" }}
-              className="bg-white border border-purple-100 rounded-3xl p-6 md:p-8 shadow-lg shadow-purple-100/20 relative overflow-hidden"
-              id="client-profile-panel"
-            >
-              {/* Decorative backgrounds */}
-              <div className="absolute top-[-20%] right-[-10%] w-64 h-64 bg-purple-50/40 rounded-full blur-3xl pointer-events-none" />
-              <div className="absolute bottom-[-10%] left-[-10%] w-64 h-64 bg-emerald-50/30 rounded-full blur-3xl pointer-events-none" />
-
-              <div className="relative z-10 space-y-6">
-                {/* Header of Profile */}
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-4">
-                  <div className="flex items-center gap-3">
-                    <div className="p-2.5 bg-purple-50 text-purple-600 rounded-2xl border border-purple-100/50">
-                      <User className="w-5 h-5" />
-                    </div>
-                    <div>
-                      <h3 className="text-lg font-extrabold text-slate-900 tracking-tight font-sans">Mi Perfil Personal & Bancario</h3>
-                      <p className="text-xs text-slate-400">Verifica tus datos de contacto y de cuenta registrados en el sistema</p>
-                    </div>
-                  </div>
-                  
-                  {/* Status label */}
-                  <div className="flex items-center gap-1.5 self-start sm:self-center px-3 py-1.5 rounded-full bg-purple-50 text-purple-700 border border-purple-100 text-xs font-semibold">
-                    <ShieldCheck className="w-4 h-4 text-purple-600" />
-                    <span>Datos Verificados</span>
-                  </div>
-                </div>
-
-                {/* Profile Grid Details */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                  {/* Col 1: Datos Personales */}
-                  <div className="space-y-4">
-                    <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest flex items-center gap-1.5">
-                      <User className="w-3.5 h-3.5 text-purple-500" />
-                      Información de Contacto
-                    </h4>
-                    
-                    <div className="bg-slate-50/50 p-4 rounded-2xl border border-slate-100 space-y-3.5">
-                      <div className="grid grid-cols-3 gap-2 py-0.5 border-b border-slate-100/50 pb-2">
-                        <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Nombre</span>
-                        <span className="col-span-2 text-xs font-bold text-slate-800">{clientData.nombre}</span>
-                      </div>
-                      
-                      <div className="grid grid-cols-3 gap-2 py-0.5 border-b border-slate-100/50 pb-2">
-                        <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Identificación</span>
-                        <span className="col-span-2 text-xs font-bold text-slate-800 font-mono">C.C. {clientData.cedula}</span>
-                      </div>
-
-                      <div className="grid grid-cols-3 gap-2 py-0.5 border-b border-slate-100/50 pb-2">
-                        <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Celular / Tel</span>
-                        <span className="col-span-2 text-xs font-bold text-slate-800 font-mono">{clientData.telefono}</span>
-                      </div>
-
-                      <div className="grid grid-cols-3 gap-2 py-0.5 border-b border-slate-100/50 pb-2">
-                        <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Correo</span>
-                        <span className="col-span-2 text-xs font-bold text-slate-800">{clientData.correo}</span>
-                      </div>
-
-                      <div className="grid grid-cols-3 gap-2 py-0.5">
-                        <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Dirección</span>
-                        <span className="col-span-2 text-xs font-medium text-slate-700">{clientData.direccion}</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Col 2: Cuenta Bancaria & Seguridad */}
-                  <div className="space-y-4">
-                    <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest flex items-center gap-1.5">
-                      <Landmark className="w-3.5 h-3.5 text-purple-500" />
-                      Cuenta para Desembolsos y Pagos
-                    </h4>
-
-                    <div className="bg-purple-50/20 p-5 rounded-2xl border border-purple-100/40 space-y-4">
-                      <div className="flex items-start gap-3">
-                        <div className="p-2.5 bg-white text-purple-600 rounded-xl shadow-sm border border-purple-100/50 shrink-0">
-                          <Landmark className="w-4 h-4" />
-                        </div>
-                        <div className="space-y-1">
-                          <span className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">Banco o Entidad Financiera</span>
-                          <span className="block text-sm font-extrabold text-purple-900 uppercase">
-                            {clientData.banco || 'No especificado'}
-                          </span>
-                        </div>
-                      </div>
-
-                      <div className="flex items-start gap-3 border-t border-purple-100/30 pt-3">
-                        <div className="p-2.5 bg-white text-purple-600 rounded-xl shadow-sm border border-purple-100/50 shrink-0 font-mono text-xs font-bold">
-                          N°
-                        </div>
-                        <div className="space-y-1">
-                          <span className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">Número de Cuenta Registrada</span>
-                          <span className="block text-sm font-mono font-bold text-slate-800">
-                            {clientData.numeroCuenta || 'No registrada'}
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Admin notice regarding safety and edit permission */}
-                    <div className="p-3.5 rounded-xl bg-amber-50/50 border border-amber-100/30 flex items-start gap-2.5 text-[11px] text-amber-700">
-                      <AlertTriangle className="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
-                      <p className="leading-relaxed">
-                        <strong className="font-extrabold">Aviso de seguridad:</strong> Para proteger la integridad de tus fondos, estos datos son de <span className="underline">solo lectura</span> para el afiliado. Si necesitas actualizar tu banco, número de cuenta o algún dato de contacto, por favor ponte en contacto con un asesor para que el Administrador realice la modificación.
-                      </p>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </motion.section>
-          )}
-        </AnimatePresence>
-
-        {/* Centro de Notificaciones */}
-        <motion.section
-          initial={{ opacity: 0, y: 15 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="bg-white border border-purple-100 rounded-3xl p-6 md:p-8 shadow-lg shadow-purple-100/20 max-w-3xl mx-auto w-full"
-          id="client-messages-notifs-panel"
-        >
-          <div className="space-y-6">
-            <div className="flex items-center gap-3 pb-3 border-b border-slate-100">
-              <div className="p-2.5 bg-purple-50 text-purple-600 rounded-2xl border border-purple-100/50">
-                <span className="relative flex h-5 w-5 items-center justify-center">
-                  {notificationStatus === 'granted' && (
-                    <span className="absolute inline-flex h-3 w-3 rounded-full bg-emerald-400 opacity-75 animate-ping"></span>
-                  )}
-                  <ShieldCheck className="w-5 h-5" />
+                <span className="font-extrabold text-lg text-slate-900 block leading-tight">CrediULEP Oficial</span>
+                <span className="px-2 py-0.5 bg-emerald-50 text-emerald-700 text-[9px] font-black uppercase tracking-wider rounded border border-emerald-200/40">
+                  Conectado
                 </span>
               </div>
-              <div>
-                <h3 className="text-lg font-extrabold text-slate-900 tracking-tight">Notificaciones Push</h3>
-                <p className="text-xs text-slate-500">Mantente al día sobre tus cuotas, solicitudes y novedades</p>
-              </div>
-            </div>
-
-            <div className="bg-slate-50 p-5 rounded-2xl border border-slate-100/80 space-y-4">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Estado del Servicio</span>
-                {notificationStatus === 'granted' ? (
-                  <span className="px-2.5 py-1 bg-emerald-50 text-emerald-700 border border-emerald-100 rounded-lg text-xs font-bold flex items-center gap-1.5">
-                    <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
-                    Activo (Vía SW)
-                  </span>
-                ) : notificationStatus === 'denied' ? (
-                  <span className="px-2.5 py-1 bg-rose-50 text-rose-700 border border-rose-100 rounded-lg text-xs font-bold">
-                    Bloqueado ⚠️
-                  </span>
-                ) : (
-                  <span className="px-2.5 py-1 bg-amber-50 text-amber-700 border border-amber-100 rounded-lg text-xs font-bold">
-                    No Configurado
-                  </span>
-                )}
-              </div>
-
-              <p className="text-xs text-slate-600 leading-relaxed">
-                {notificationStatus === 'granted'
-                  ? 'Excelente. El Service Worker está configurado para recibir alertas del sistema e informarte en tiempo real sobre aprobaciones de créditos, recordatorios de pago de cuotas y otras novedades importantes de CrediULEP.'
-                  : notificationStatus === 'denied'
-                  ? 'Has bloqueado las notificaciones en este navegador. Para estar al día, por favor haz clic en el candado de la barra de direcciones de tu navegador y activa los permisos de notificación.'
-                  : 'Activa las notificaciones automáticas para recibir alertas inmediatas de tu saldo, aprobaciones de préstamos y recordatorios de vencimiento de cuotas.'}
+              <p className="text-slate-500 text-xs mt-1 font-semibold">
+                Portal de Servicios Financieros y Afiliados. Revisa el estado de tu amortización interactiva abajo.
               </p>
-
-              <div className="pt-2 space-y-3">
-                {notificationStatus !== 'granted' && (
-                  <button
-                    onClick={requestNotificationPermission}
-                    className="w-full py-3 px-4 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white font-bold rounded-2xl shadow-md shadow-purple-500/10 active:scale-[0.98] transition-all cursor-pointer text-sm"
-                    id="btn-enable-notifications"
-                  >
-                    Habilitar Notificaciones Push
-                  </button>
-                )}
-
-                {notificationStatus === 'granted' && (
-                  <button
-                    onClick={handleTestNotification}
-                    className="w-full py-3 px-4 bg-white border border-purple-200 hover:border-purple-300 text-purple-700 font-bold rounded-2xl shadow-sm hover:bg-purple-50 active:scale-[0.98] transition-all cursor-pointer text-sm"
-                    id="btn-test-notification"
-                  >
-                    Enviar Notificación de Prueba
-                  </button>
-                )}
-
-                {testFeedback && (
-                  <p className="text-center text-xs font-semibold text-emerald-600 animate-bounce">
-                    {testFeedback}
-                  </p>
-                )}
-              </div>
-            </div>
-
-            {/* Lista de Notificaciones de la Administración */}
-            <div className="border-t border-slate-100 pt-6 space-y-4" id="client-received-notifications-subpanel">
-              <h4 className="text-sm font-extrabold text-slate-800 flex items-center gap-2">
-                <Bell className="w-4 h-4 text-purple-600" />
-                Historial de Alertas de CrediULEP
-              </h4>
-
-              {(!clientData.notificaciones || clientData.notificaciones.length === 0) ? (
-                <div className="bg-slate-50/50 p-6 rounded-2xl text-center text-xs text-slate-400 font-medium italic border border-dashed border-slate-200">
-                  No tienes comunicados o alertas pendientes. ¡Estás al día con todo!
-                </div>
-              ) : (
-                <div className="space-y-3 max-h-[300px] overflow-y-auto pr-1">
-                  {clientData.notificaciones.map((notif) => (
-                    <div
-                      key={notif.id}
-                      className={`p-4 rounded-2xl border transition-all flex flex-col gap-1.5 ${
-                        notif.leido 
-                          ? 'bg-slate-50/50 border-slate-100 text-slate-500' 
-                          : 'bg-purple-50/20 border-purple-100 text-slate-800 shadow-sm'
-                      }`}
-                    >
-                      <div className="flex items-start justify-between gap-4">
-                        <div className="flex items-center gap-2">
-                          {!notif.leido && (
-                            <span className="h-2 w-2 rounded-full bg-purple-600 shrink-0" title="Nueva" />
-                          )}
-                          <h5 className="text-xs font-black tracking-tight">{notif.titulo}</h5>
-                        </div>
-                        <span className="text-[9px] font-bold text-slate-400 shrink-0">
-                          {new Date(notif.fecha).toLocaleDateString()} {new Date(notif.fecha).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                        </span>
-                      </div>
-                      <p className="text-[11px] font-medium leading-relaxed">{notif.mensaje}</p>
-                      
-                      {!notif.leido && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            // Mark as read
-                            const updatedClients = clients.map(c => {
-                              if (c.cedula === clientData.cedula) {
-                                return {
-                                  ...c,
-                                  notificaciones: (c.notificaciones || []).map(n => 
-                                    n.id === notif.id ? { ...n, leido: true } : n
-                                  )
-                                };
-                              }
-                              return c;
-                            });
-                            setClients(updatedClients);
-                            saveDatabase(updatedClients);
-                          }}
-                          className="self-end text-[10px] font-bold text-purple-600 hover:text-purple-700 hover:underline cursor-pointer"
-                        >
-                          Marcar como leída
-                        </button>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              )}
             </div>
           </div>
         </motion.section>
 
         {/* ----------------- CASE: ACTIVE LOAN ----------------- */}
         {!isPazYSalvo && loanStats && clientData.prestamo && (
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-8" id="client-active-loan-section">
-            
-            {/* Left Column (5 of 12 cols): Banking Card, Payment Status & Support */}
-            <div className="lg:col-span-5 space-y-8">
+          <div className="space-y-12" id="client-active-loan-section">
+            {/* 1. Resumen General */}
+            <div className="space-y-6">
+              <div className="border-b border-slate-100 pb-3">
+                <h2 className="text-base font-black text-slate-800 uppercase tracking-wider flex items-center gap-2">
+                  <User className="w-5 h-5 text-purple-600" />
+                  Resumen General
+                </h2>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-8 max-w-4xl mx-auto">
               
               {/* 1. Interactive Dual-Ring Credit Progress Circle */}
               <motion.div
@@ -863,13 +968,15 @@ export default function ClientDashboard({ session, clients, setClients, onLogout
                     </div>
 
                     {/* Pay Cuota WhatsApp Trigger */}
-                    <button
+                    <motion.button
+                      whileHover={{ scale: 1.02, translateY: -1 }}
+                      whileTap={{ scale: 0.98 }}
                       onClick={() => openWhatsAppTemplate('reportar_pago')}
-                      className="w-full flex items-center justify-center gap-2 py-3 bg-gradient-to-r from-purple-600 to-purple-700 hover:from-purple-500 hover:to-purple-600 text-white rounded-2xl font-bold shadow-md shadow-purple-500/10 active:scale-[0.98] transition-all text-sm cursor-pointer"
+                      className="w-full flex items-center justify-center gap-2 py-3 bg-gradient-to-r from-purple-600 to-purple-700 hover:from-purple-500 hover:to-purple-600 text-white rounded-2xl font-bold shadow-md shadow-purple-500/10 transition-all text-sm cursor-pointer"
                     >
                       <Send className="w-4 h-4" />
                       <span>Pagar</span>
-                    </button>
+                    </motion.button>
                   </div>
                 ) : (
                   <div className="py-4 text-center">
@@ -879,59 +986,41 @@ export default function ClientDashboard({ session, clients, setClients, onLogout
                   </div>
                 )}
               </div>
-
-              {/* 3. Direct Contact Support */}
-              <div className="bg-white border border-purple-100 p-6 rounded-3xl shadow-sm space-y-5">
-                <div>
-                  <h3 className="text-sm font-black text-slate-900 uppercase tracking-wider">Buzón de Atención</h3>
-                  <p className="text-[10px] text-slate-400">Canales autorizados de atención e intermediación</p>
-                </div>
-
-                <div className="space-y-2.5">
-                  <button
-                    onClick={() => openWhatsAppTemplate('consulta')}
-                    className="w-full flex items-center justify-between p-3.5 bg-slate-50/50 hover:bg-purple-50/30 rounded-2xl border border-slate-100 hover:border-purple-100 transition-all text-left group cursor-pointer"
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className="p-2 bg-purple-50 text-purple-600 rounded-lg group-hover:bg-purple-100 transition-colors">
-                        <HelpCircle className="w-4 h-4" />
-                      </div>
-                      <div>
-                        <span className="block font-bold text-slate-800 text-xs">Consulta de Movimientos</span>
-                        <span className="block text-[9px] text-slate-400">Auditar saldos históricos</span>
-                      </div>
-                    </div>
-                    <ArrowUpRight className="w-4 h-4 text-slate-400 group-hover:text-purple-600 transition-colors" />
-                  </button>
-
-                  <div className="p-3.5 bg-slate-50 rounded-2xl border border-slate-100 text-center">
-                    <span className="text-[9px] font-black text-slate-400 block uppercase tracking-widest">Soporte Corporativo</span>
-                    <span className="text-xs font-bold text-purple-700 block mt-1">Lunes a Sábado 8:00 AM - 6:00 PM</span>
-                  </div>
-                </div>
-              </div>
             </div>
+          </div>
+        {/* End of 1. Resumen General */}
 
-            {/* Right Column (7 of 12 cols): Interactive Timeline Cronogram */}
-            <div className="lg:col-span-7 space-y-6">
-              
-              <div className="bg-white border border-purple-100 p-6 rounded-3xl shadow-sm space-y-6">
-                
-                {/* Cronogram Header */}
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-50 pb-5">
-                  <div>
-                    <h3 className="text-lg font-extrabold text-slate-900 tracking-tight">Cronograma de Amortización</h3>
+        {/* 2. Cronograma de Pagos */}
+        <div className="space-y-6">
+          <div className="border-b border-slate-100 pb-3">
+            <h2 className="text-base font-black text-slate-800 uppercase tracking-wider flex items-center gap-2">
+              <Calendar className="w-5 h-5 text-purple-600" />
+              Cronograma de Pagos
+            </h2>
+          </div>
+          <div className="max-w-4xl mx-auto space-y-6">
+        
+        {/* Right Column (originally 7 of 12 cols): Interactive Timeline Cronogram */}
+          
+          <div className="bg-white border border-purple-100 p-6 rounded-3xl shadow-sm space-y-6">
+            
+            {/* Cronogram Header */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-50 pb-5">
+              <div>
+                <h3 className="text-lg font-extrabold text-slate-900 tracking-tight">Cronograma de Amortización</h3>
                     <p className="text-xs text-slate-400">Desglose secuencial de cuotas generadas por la entidad</p>
                   </div>
                   
                   {/* Action Print */}
-                  <button
+                  <motion.button
+                    whileHover={{ scale: 1.03 }}
+                    whileTap={{ scale: 0.97 }}
                     onClick={() => window.print()}
                     className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer border border-slate-200/50"
                   >
                     <FileText className="w-4 h-4 text-slate-500" />
                     <span>Imprimir Extracto</span>
-                  </button>
+                  </motion.button>
                 </div>
 
                 {/* Interactive Status Tab Filter */}
@@ -1058,14 +1147,22 @@ export default function ClientDashboard({ session, clients, setClients, onLogout
               </div>
             </div>
           </div>
+          {/* End of 2. Cronograma de Pagos */}
+          </div>
         )}
 
         {/* ----------------- CASE: NO LOAN OR FULLY CANCELLED ----------------- */}
         {isPazYSalvo && (
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-8" id="client-no-loan-section">
-            
-            {/* Left Column (5 of 12 cols): Available credit badge & support */}
-            <div className="lg:col-span-5 space-y-8">
+          <div className="space-y-12" id="client-no-loan-section">
+            {/* 1. Resumen General */}
+            <div className="space-y-6">
+              <div className="border-b border-slate-100 pb-3">
+                <h2 className="text-base font-black text-slate-800 uppercase tracking-wider flex items-center gap-2">
+                  <User className="w-5 h-5 text-purple-600" />
+                  Resumen General
+                </h2>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-8 max-w-4xl mx-auto">
               
               {/* 1. Pre-Approved Circular Credit Meter */}
               <motion.div
@@ -1123,11 +1220,10 @@ export default function ClientDashboard({ session, clients, setClients, onLogout
                     />
                   </svg>
 
-                  {/* Centered text */}
                   <div className="absolute flex flex-col items-center justify-center text-center">
                     <span className="text-[9px] text-slate-400 font-bold uppercase tracking-widest">Disponible</span>
                     <span className="text-2xl font-black text-slate-900 font-mono tracking-tight mt-0.5">
-                      $5,000,000
+                      {clientData ? formatCurrency(clientData.montoMaximo ?? 10000000) : "$10,000,000"}
                     </span>
                     <div className="flex items-center gap-1 mt-1 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-100">
                       <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block animate-pulse" />
@@ -1163,137 +1259,216 @@ export default function ClientDashboard({ session, clients, setClients, onLogout
                 </div>
               </div>
 
-              {/* 3. Help Contact Channels */}
-              <div className="bg-white border border-purple-100 p-6 rounded-3xl shadow-sm space-y-4">
-                <div>
-                  <h3 className="text-xs font-black text-slate-900 uppercase tracking-widest">Atención Corporativa</h3>
-                  <p className="text-[10px] text-slate-400">¿Tienes dudas sobre tu pre-aprobado?</p>
-                </div>
+            </div>
+          </div>
+        {/* End of 1. Resumen General */}
 
+        {/* 2. Cronograma de Pagos */}
+        <div className="space-y-6">
+          <div className="border-b border-slate-100 pb-3">
+            <h2 className="text-base font-black text-slate-800 uppercase tracking-wider flex items-center gap-2">
+              <Calendar className="w-5 h-5 text-purple-600" />
+              Cronograma de Pagos
+            </h2>
+          </div>
+          <div className="max-w-2xl mx-auto py-12 text-center bg-white border border-purple-100 p-8 rounded-3xl shadow-sm space-y-6">
+            <div className="w-16 h-16 rounded-full bg-purple-50 flex items-center justify-center text-purple-600 mx-auto">
+              <Calendar className="w-8 h-8" />
+            </div>
+            <div className="space-y-2">
+              <h3 className="text-lg font-black text-slate-900">No tienes cuotas programadas</h3>
+                  <p className="text-xs text-slate-500 max-w-md mx-auto leading-relaxed">
+                    Te encuentras a Paz y Salvo con la cooperativa. No hay un cronograma de amortización activo en este momento.
+                  </p>
+                </div>
                 <button
-                  onClick={() => openWhatsAppTemplate('consulta')}
-                  className="w-full flex items-center justify-between p-3 bg-slate-50 hover:bg-purple-50/50 rounded-2xl border border-slate-100 hover:border-purple-100 transition-all text-left group cursor-pointer"
+                  type="button"
+                  onClick={() => {
+                    const element = document.getElementById('simulator-section');
+                    if (element) {
+                      element.scrollIntoView({ behavior: 'smooth' });
+                    }
+                  }}
+                  className="inline-flex items-center gap-2 px-6 py-2.5 bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs rounded-xl shadow-md shadow-purple-600/10 transition-all cursor-pointer"
                 >
-                  <div className="flex items-center gap-3">
-                    <div className="p-2 bg-purple-50 text-purple-600 rounded-xl group-hover:bg-purple-100 transition-colors">
-                      <HelpCircle className="w-4 h-4" />
-                    </div>
-                    <div>
-                      <span className="block font-bold text-slate-800 text-xs">Asistencia Financiera</span>
-                      <span className="block text-[9px] text-slate-400">Consultar requisitos</span>
-                    </div>
-                  </div>
-                  <ArrowUpRight className="w-4 h-4 text-slate-400 group-hover:text-purple-600 transition-colors" />
+                  <Sparkles className="w-4 h-4" />
+                  <span>Ir al Simulador</span>
                 </button>
+            </div>
+          </div>
+          {/* End of 2. Cronograma de Pagos */}
+
+            {/* 3. Simulador de Pagos */}
+            <div className="space-y-6" id="simulator-section">
+              <div className="border-b border-slate-100 pb-3">
+                <h2 className="text-base font-black text-slate-800 uppercase tracking-wider flex items-center gap-2">
+                  <Sparkles className="w-5 h-5 text-purple-600" />
+                  Simulador de Pagos
+                </h2>
+              </div>
+              <div className="max-w-4xl mx-auto">
+                {renderSimulator()}
               </div>
             </div>
-
-            {/* Right Column (7 of 12 cols): Interactive Credit Simulator with Live Amortization Schedule! */}
-            <div className="lg:col-span-7 space-y-6">
-              <div className="bg-white border border-purple-100 p-6 rounded-3xl shadow-sm space-y-6">
-                <div>
-                  <h3 className="text-lg font-extrabold text-slate-900 tracking-tight">Simulador Financiero CrediULEP</h3>
-                  <p className="text-xs text-slate-400">Ajusta el monto del desembolso para cotizar el plan de cuotas correspondiente</p>
-                </div>
-
-                {/* Slider Panel */}
-                <div className="p-6 bg-purple-50/30 rounded-2xl border border-purple-100/50 space-y-5">
-                  <div className="flex items-center justify-between">
-                    <span className="text-[10px] font-black text-purple-700 uppercase tracking-widest">
-                      Monto de Financiamiento
-                    </span>
-                    <span className="text-[10px] font-mono text-purple-600 font-bold bg-white px-2.5 py-1 rounded-lg border border-purple-100/60 shadow-sm">
-                      Paso: $100K COP
-                    </span>
-                  </div>
-
-                  <div className="text-center py-2 bg-white rounded-2xl border border-purple-100/30 shadow-inner">
-                    <span className="text-3xl font-black text-slate-900 tracking-tight font-mono">
-                      {formatCurrency(requestedAmount)}
-                    </span>
-                  </div>
-
-                  <div className="space-y-1">
-                    <input
-                      type="range"
-                      min="500000"
-                      max="10000000"
-                      step="100000"
-                      value={requestedAmount}
-                      onChange={(e) => setRequestedAmount(Number(e.target.value))}
-                      className="w-full h-2 bg-purple-100 rounded-lg appearance-none cursor-pointer accent-purple-600 focus:outline-none focus:ring-2 focus:ring-purple-500"
-                      id="amount-slider"
-                    />
-                    <div className="flex justify-between text-[10px] text-slate-400 font-bold font-mono">
-                      <span>{formatCurrency(500000)}</span>
-                      <span>{formatCurrency(10000000)}</span>
-                    </div>
-                  </div>
-
-                  <div className="pt-4 border-t border-dashed border-purple-200/60 flex items-center justify-between text-xs text-purple-950 font-bold">
-                    <span className="opacity-80">Cuota Fija Mensual Estimada (12 meses):</span>
-                    <span className="font-mono text-purple-700 text-sm font-black bg-white px-3 py-1.5 rounded-xl border border-purple-100/50 shadow-sm">
-                      {formatCurrency(Math.round((requestedAmount * 1.18) / 12))} / mes
-                    </span>
-                  </div>
-                </div>
-
-                {/* Live Proposed Installments Table */}
-                <div className="space-y-3">
-                  <h4 className="text-xs font-black text-slate-700 uppercase tracking-wider">Plan de Pagos Simulado (Amortización)</h4>
-                  <div className="overflow-x-auto rounded-2xl border border-slate-100 shadow-sm">
-                    <table className="w-full text-left border-collapse">
-                      <thead>
-                        <tr className="bg-slate-50 text-[10px] font-black text-slate-500 uppercase tracking-wider border-b border-slate-100">
-                          <th className="p-3">Cuota</th>
-                          <th className="p-3">Abono Capital</th>
-                          <th className="p-3">Interés (1.5%)</th>
-                          <th className="p-3 text-right">Monto Total</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {Array.from({ length: 12 }).map((_, i) => {
-                          const numero = i + 1;
-                          const totalPayment = Math.round((requestedAmount * 1.18) / 12);
-                          const interestPayment = Math.round(requestedAmount * 0.015);
-                          const capitalPayment = totalPayment - interestPayment;
-
-                          return (
-                            <tr key={numero} className="border-b border-slate-50 text-xs font-medium hover:bg-slate-50/50 transition-colors">
-                              <td className="p-3 font-bold text-slate-700">Mes {numero}</td>
-                              <td className="p-3 font-mono text-slate-500">{formatCurrency(capitalPayment)}</td>
-                              <td className="p-3 font-mono text-slate-500">{formatCurrency(interestPayment)}</td>
-                              <td className="p-3 text-right font-bold text-purple-700 font-mono">{formatCurrency(totalPayment)}</td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-
-                {/* Primary Solicitation Button */}
-                <button
-                  onClick={() => openWhatsAppCreditRequest(requestedAmount)}
-                  className="w-full flex items-center justify-between p-4 bg-gradient-to-r from-purple-600 to-purple-700 hover:from-purple-500 hover:to-purple-600 text-white rounded-2xl shadow-lg shadow-purple-500/10 transition-all text-left group cursor-pointer"
-                >
-                  <div className="flex items-center gap-3">
-                    <div className="p-2 bg-white/10 rounded-xl">
-                      <Sparkles className="w-5 h-5 text-yellow-300 animate-pulse" />
-                    </div>
-                    <div>
-                      <span className="block font-black text-sm">Desembolsar Crédito Simulado</span>
-                      <span className="block text-[10px] text-purple-100">Envía tu propuesta de amortización por WhatsApp</span>
-                    </div>
-                  </div>
-                  <ArrowUpRight className="w-5 h-5 text-white/90" />
-                </button>
-              </div>
-            </div>
-
+            {/* End of 3. Simulador de Pagos */}
           </div>
         )}
       </main>
+
+      {/* ANUNCIO EN PANTALLA: PRIMER INGRESO (CAMBIAR CONTRASEÑA) */}
+      <AnimatePresence>
+        {showFirstTimeAd && (
+          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              className="bg-white border border-slate-100 rounded-3xl max-w-md w-full p-6 shadow-2xl relative overflow-hidden"
+            >
+              {/* Decorative top header pattern */}
+              <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-amber-500 via-purple-600 to-purple-700" />
+              
+              <div className="flex flex-col items-center text-center space-y-4 pt-4">
+                <div className="p-3.5 bg-amber-50 text-amber-600 rounded-2xl border border-amber-100 animate-bounce">
+                  <ShieldAlert className="w-8 h-8" />
+                </div>
+                
+                <div className="space-y-1.5">
+                  <h3 className="text-lg font-black text-slate-900 tracking-tight">Cambia tu contraseña por seguridad</h3>
+                  <p className="text-xs text-slate-500 font-semibold uppercase tracking-wider">¡Protege tu cuenta de socio!</p>
+                </div>
+
+                <p className="text-xs text-slate-600 leading-relaxed max-w-sm">
+                  Hemos detectado que estás ingresando por primera vez o que aún utilizas tu número de cédula como contraseña de acceso.
+                  <strong className="block mt-1 text-slate-800">Por tu seguridad, te solicitamos actualizarla por una contraseña única y personalizada.</strong>
+                </p>
+
+                <div className="w-full pt-4 flex flex-col gap-2.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      sessionStorage.setItem(`seen_pw_ad_${clientData?.cedula}`, 'true');
+                      setShowFirstTimeAd(false);
+                      setShowPasswordChangeModal(true);
+                    }}
+                    className="w-full bg-purple-600 hover:bg-purple-750 text-white font-bold py-3 px-4 rounded-xl text-xs shadow-lg shadow-purple-600/15 transition-all cursor-pointer flex items-center justify-center gap-2 active:scale-[0.98]"
+                  >
+                    <KeyRound className="w-4 h-4" />
+                    <span>Cambiar Contraseña Ahora</span>
+                  </button>
+                  
+                  <button
+                    type="button"
+                    onClick={() => {
+                      sessionStorage.setItem(`seen_pw_ad_${clientData?.cedula}`, 'true');
+                      setShowFirstTimeAd(false);
+                    }}
+                    className="w-full bg-slate-50 hover:bg-slate-100 text-slate-500 hover:text-slate-700 font-bold py-2.5 px-4 rounded-xl text-xs transition-all cursor-pointer border border-slate-200/60"
+                  >
+                    Recordar más tarde
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* MODAL DE CAMBIO DE CONTRASEÑA */}
+      <AnimatePresence>
+        {showPasswordChangeModal && (
+          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              className="bg-white border border-slate-100 rounded-3xl max-w-md w-full overflow-hidden shadow-2xl"
+            >
+              <div className="bg-slate-50 px-6 py-4 border-b border-slate-100 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <div className="p-2 bg-purple-50 text-purple-600 rounded-lg">
+                    <Lock className="w-4 h-4" />
+                  </div>
+                  <h3 className="text-sm font-bold text-slate-800">Cambiar Contraseña de Acceso</h3>
+                </div>
+                {!passwordChangeSuccess && (
+                  <button
+                    type="button"
+                    onClick={() => setShowPasswordChangeModal(false)}
+                    className="text-slate-400 hover:text-slate-600 p-1.5 hover:bg-slate-100 rounded-full transition-colors cursor-pointer"
+                  >
+                    ✕
+                  </button>
+                )}
+              </div>
+
+              {passwordChangeSuccess ? (
+                <div className="p-8 text-center flex flex-col items-center space-y-3">
+                  <div className="p-3 bg-emerald-50 text-emerald-600 rounded-full border border-emerald-100 animate-pulse">
+                    <CheckCircle2 className="w-10 h-10" />
+                  </div>
+                  <h4 className="text-base font-black text-slate-950">¡Cambio Exitoso!</h4>
+                  <p className="text-xs text-slate-500 max-w-xs leading-relaxed">
+                    Tu contraseña ha sido actualizada correctamente en el sistema. Utiliza tu nueva contraseña en tu próximo inicio de sesión.
+                  </p>
+                </div>
+              ) : (
+                <form onSubmit={handlePasswordChangeSubmit} className="p-6 space-y-4">
+                  {passwordChangeError && (
+                    <div className="p-3 bg-red-50 border border-red-100 text-red-700 text-xs rounded-xl flex items-center gap-2 font-medium">
+                      <ShieldAlert className="w-4 h-4 shrink-0" />
+                      <span>{passwordChangeError}</span>
+                    </div>
+                  )}
+
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-slate-500 block">Contraseña Actual *</label>
+                    <input
+                      type="password"
+                      required
+                      value={currentPasswordInput}
+                      onChange={(e) => setCurrentPasswordInput(e.target.value)}
+                      placeholder="Ingresa tu contraseña actual"
+                      className="w-full bg-slate-50 border border-slate-200 focus:border-purple-500 focus:ring-1 focus:ring-purple-500/20 rounded-xl px-3.5 py-2.5 text-sm outline-none transition-all"
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-slate-500 block">Nueva Contraseña *</label>
+                    <input
+                      type="password"
+                      required
+                      value={newPasswordInput}
+                      onChange={(e) => setNewPasswordInput(e.target.value)}
+                      placeholder="Mínimo 4 caracteres"
+                      className="w-full bg-slate-50 border border-slate-200 focus:border-purple-500 focus:ring-1 focus:ring-purple-500/20 rounded-xl px-3.5 py-2.5 text-sm outline-none transition-all"
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-slate-500 block">Confirmar Nueva Contraseña *</label>
+                    <input
+                      type="password"
+                      required
+                      value={confirmPasswordInput}
+                      onChange={(e) => setConfirmPasswordInput(e.target.value)}
+                      placeholder="Repite tu nueva contraseña"
+                      className="w-full bg-slate-50 border border-slate-200 focus:border-purple-500 focus:ring-1 focus:ring-purple-500/20 rounded-xl px-3.5 py-2.5 text-sm outline-none transition-all"
+                    />
+                  </div>
+
+                  <button
+                    type="submit"
+                    className="w-full bg-gradient-to-r from-purple-600 to-purple-700 hover:from-purple-500 hover:to-purple-600 text-white font-bold py-3 rounded-xl shadow-lg shadow-purple-500/10 transition-all text-xs tracking-wide cursor-pointer active:scale-[0.98] mt-2"
+                  >
+                    Guardar Nueva Contraseña
+                  </button>
+                </form>
+              )}
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
