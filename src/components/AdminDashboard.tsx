@@ -45,7 +45,7 @@ import {
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { Client, Loan, Installment } from '../types';
-import { generateAmortizationSchedule, formatCurrency, saveDatabase } from '../utils';
+import { generateAmortizationSchedule, formatCurrency, saveDatabase, parseNumericInput } from '../utils';
 import { sendPushNotification } from '../App';
 import {
   ResponsiveContainer,
@@ -398,21 +398,25 @@ export default function AdminDashboard({
     e.preventDefault();
 
     // Validations
-    if (!newClient.cedula.trim() || !newClient.nombre.trim()) {
+    const cleanCedula = newClient.cedula.trim();
+    const cleanNombre = newClient.nombre.trim();
+
+    if (!cleanCedula || !cleanNombre) {
       triggerAlert('error', 'Cédula y Nombre Completo son requeridos.');
       return;
     }
 
-    if (clients.some((c) => c.cedula === newClient.cedula.trim())) {
-      triggerAlert('error', `Ya existe un afiliado con la cédula ${newClient.cedula}.`);
+    if (clients.some((c) => c.cedula === cleanCedula)) {
+      triggerAlert('error', `Ya existe un afiliado con la cédula ${cleanCedula}.`);
       return;
     }
 
-    const montoVal = parseFloat(newClient.monto);
-    const tasaVal = parseFloat(newClient.tasa);
-    const plazoVal = parseInt(newClient.plazo);
+    const montoVal = parseNumericInput(newClient.monto);
+    const tasaVal = parseNumericInput(newClient.tasa);
+    const plazoVal = Math.max(1, Math.round(parseNumericInput(newClient.plazo)));
+    const montoMaximoVal = parseNumericInput(newClient.montoMaximo) || 10000000;
 
-    if (isNaN(montoVal) || montoVal <= 0 || isNaN(tasaVal) || tasaVal < 0 || isNaN(plazoVal) || plazoVal <= 0) {
+    if (montoVal <= 0 || tasaVal < 0 || plazoVal <= 0) {
       triggerAlert('error', 'Por favor configure montos, tasas y plazos válidos.');
       return;
     }
@@ -421,7 +425,7 @@ export default function AdminDashboard({
       montoVal,
       tasaVal,
       plazoVal,
-      newClient.fechaInicio
+      newClient.fechaInicio || new Date().toISOString().split('T')[0]
     );
 
     const newLoan: Loan = {
@@ -429,22 +433,24 @@ export default function AdminDashboard({
       montoOriginal: montoVal,
       tasaInteresMensual: tasaVal,
       plazoMeses: plazoVal,
-      fechaInicio: newClient.fechaInicio,
-      estado: newClient.estadoInicial,
+      fechaInicio: newClient.fechaInicio || new Date().toISOString().split('T')[0],
+      estado: newClient.estadoInicial || 'vigente',
       cuotas: initialSchedule,
     };
 
     const addedClient: Client = {
-      cedula: newClient.cedula.trim(),
-      contrasena: newClient.cedula.trim(), // password defaults to national ID for ease of use
-      nombre: newClient.nombre.trim(),
+      cedula: cleanCedula,
+      contrasena: cleanCedula, // password defaults to national ID for ease of use
+      nombre: cleanNombre,
       correo: newClient.correo.trim() || 'sin_correo@email.com',
       telefono: newClient.telefono.trim() || '3000000000',
       direccion: newClient.direccion.trim() || 'No registrada',
       prestamo: newLoan,
       banco: newClient.banco.trim() || 'No especificado',
       numeroCuenta: newClient.numeroCuenta.trim() || 'No registrada',
-      montoMaximo: parseFloat(newClient.montoMaximo) || 10000000,
+      montoMaximo: montoMaximoVal,
+      mensajes: [],
+      notificaciones: [],
     };
 
     const updatedClients = [...clients, addedClient];
@@ -499,11 +505,11 @@ export default function AdminDashboard({
       if (!editHasLoan) {
         updatedLoan = null;
       } else {
-        const montoVal = parseFloat(editMonto);
-        const tasaVal = parseFloat(editTasa);
-        const plazoVal = parseInt(editPlazo);
+        const montoVal = parseNumericInput(editMonto);
+        const tasaVal = parseNumericInput(editTasa);
+        const plazoVal = Math.max(1, Math.round(parseNumericInput(editPlazo)));
 
-        if (isNaN(montoVal) || montoVal <= 0 || isNaN(tasaVal) || tasaVal < 0 || isNaN(plazoVal) || plazoVal <= 0) {
+        if (montoVal <= 0 || tasaVal < 0 || plazoVal <= 0) {
           triggerAlert('error', 'Por favor configure un monto, tasa y plazo válidos.');
           return client;
         }
@@ -552,7 +558,7 @@ export default function AdminDashboard({
         prestamo: updatedLoan,
         banco: editBanco.trim(),
         numeroCuenta: editNumeroCuenta.trim(),
-        montoMaximo: parseFloat(editMontoMaximo) || 10000000,
+        montoMaximo: parseNumericInput(editMontoMaximo) || 10000000,
       };
     });
 
@@ -2229,9 +2235,9 @@ export default function AdminDashboard({
                           </h4>
                           
                           {(() => {
-                            const m = parseFloat(newClient.monto) || 0;
-                            const t = parseFloat(newClient.tasa) || 0;
-                            const p = parseInt(newClient.plazo) || 0;
+                            const m = parseNumericInput(newClient.monto) || 0;
+                            const t = parseNumericInput(newClient.tasa) || 0;
+                            const p = parseNumericInput(newClient.plazo) || 0;
                             
                             let cuota = 0;
                             const r = t / 100;

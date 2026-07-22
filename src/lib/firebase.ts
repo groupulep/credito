@@ -1,7 +1,7 @@
 import { initializeApp } from 'firebase/app';
 import { getFirestore, collection, doc, getDocs, setDoc, deleteDoc, writeBatch, getDocFromServer, onSnapshot } from 'firebase/firestore';
 import { getAuth, GoogleAuthProvider, signInWithPopup } from 'firebase/auth';
-import { Client } from '../types';
+import { Client, Loan } from '../types';
 import firebaseConfig from '../../firebase-applet-config.json';
 
 // Initialize Firebase
@@ -17,22 +17,67 @@ export { signInWithPopup, GoogleAuthProvider };
 // Initialize Firestore with database ID from config
 export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
 
-// Helper to sanitize client objects so no undefined fields cause Firestore setDoc failures
+// Helper to sanitize client objects so no undefined/NaN fields cause Firestore setDoc failures
 export function sanitizeClient(client: Client): Client {
+  if (!client) {
+    return {
+      cedula: '0',
+      contrasena: '0',
+      nombre: 'Usuario Sin Nombre',
+      correo: 'sin_correo@email.com',
+      telefono: '3000000000',
+      direccion: 'No registrada',
+      prestamo: null,
+      banco: 'No especificado',
+      numeroCuenta: 'No registrada',
+      mensajes: [],
+      notificaciones: [],
+      montoMaximo: 10000000,
+    };
+  }
+
   const cleanObj = JSON.parse(JSON.stringify(client));
+  const cleanCedula = String(cleanObj.cedula || '').trim();
+
+  let sanitizedLoan: Loan | null = null;
+  if (cleanObj.prestamo) {
+    const p = cleanObj.prestamo;
+    sanitizedLoan = {
+      id: String(p.id || `loan-${Math.random().toString(36).substr(2, 9)}`),
+      montoOriginal: Number(p.montoOriginal) || 0,
+      tasaInteresMensual: Number(p.tasaInteresMensual) || 0,
+      plazoMeses: Number(p.plazoMeses) || 12,
+      fechaInicio: String(p.fechaInicio || new Date().toISOString().split('T')[0]),
+      estado: p.estado || 'vigente',
+      cuotas: Array.isArray(p.cuotas)
+        ? p.cuotas.map((c: any, index: number) => ({
+            id: String(c.id || `inst-${index + 1}`),
+            numero: Number(c.numero) || index + 1,
+            montoTotal: Number(c.montoTotal) || 0,
+            capital: Number(c.capital) || 0,
+            interes: Number(c.interes) || 0,
+            saldoRestante: Number(c.saldoRestante) || 0,
+            fechaVencimiento: String(c.fechaVencimiento || ''),
+            pagado: Boolean(c.pagado),
+            fechaPago: c.fechaPago ? String(c.fechaPago) : null,
+          }))
+        : [],
+    };
+  }
+
   return {
-    cedula: String(cleanObj.cedula || '').trim(),
-    contrasena: String(cleanObj.contrasena || cleanObj.cedula || '').trim(),
+    cedula: cleanCedula,
+    contrasena: String(cleanObj.contrasena || cleanCedula).trim(),
     nombre: String(cleanObj.nombre || '').trim(),
-    correo: String(cleanObj.correo || '').trim(),
-    telefono: String(cleanObj.telefono || '').trim(),
-    direccion: String(cleanObj.direccion || '').trim(),
-    prestamo: cleanObj.prestamo || null,
-    banco: cleanObj.banco || 'No especificado',
-    numeroCuenta: cleanObj.numeroCuenta || 'No registrada',
+    correo: String(cleanObj.correo || 'sin_correo@email.com').trim(),
+    telefono: String(cleanObj.telefono || '3000000000').trim(),
+    direccion: String(cleanObj.direccion || 'No registrada').trim(),
+    prestamo: sanitizedLoan,
+    banco: String(cleanObj.banco || 'No especificado').trim(),
+    numeroCuenta: String(cleanObj.numeroCuenta || 'No registrada').trim(),
     mensajes: Array.isArray(cleanObj.mensajes) ? cleanObj.mensajes : [],
     notificaciones: Array.isArray(cleanObj.notificaciones) ? cleanObj.notificaciones : [],
-    montoMaximo: typeof cleanObj.montoMaximo === 'number' ? cleanObj.montoMaximo : 10000000,
+    montoMaximo: Number(cleanObj.montoMaximo) || 10000000,
   };
 }
 

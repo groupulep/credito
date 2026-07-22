@@ -60,8 +60,21 @@ export default function App() {
     // Live subscription to Firestore database
     const unsubscribe = subscribeToClients(
       (firebaseDb) => {
-        setClients(firebaseDb);
-        saveDatabase(firebaseDb);
+        // Merge firebaseDb with local cached DB to ensure no newly created local client is lost if snapshot triggers before write completes
+        const localDb = getDatabase();
+        const firebaseMap = new Map(firebaseDb.map((c) => [c.cedula, c]));
+        const merged: Client[] = [...firebaseDb];
+
+        for (const localClient of localDb) {
+          if (!firebaseMap.has(localClient.cedula)) {
+            merged.push(localClient);
+            // Background push local client to Firebase
+            saveClientToFirebase(localClient).catch((err) => console.error('Syncing local client error:', err));
+          }
+        }
+
+        setClients(merged);
+        saveDatabase(merged);
         setSyncError(null);
         setLoading(false);
       },
@@ -165,21 +178,23 @@ export default function App() {
           const nextMap = new Map(next.map(c => [c.cedula, c]));
 
           // 1. Save new or modified clients
-          for (const nextClient of next) {
+          const savePromises = next.map(async (nextClient) => {
             const prevClient = prevMap.get(nextClient.cedula);
             if (!prevClient || JSON.stringify(prevClient) !== JSON.stringify(nextClient)) {
               console.log(`[Smart Sync] Saving updated/new client: ${nextClient.nombre} (${nextClient.cedula})`);
               await saveClientToFirebase(nextClient);
             }
-          }
+          });
 
           // 2. Delete removed clients
-          for (const prevClient of prev) {
+          const deletePromises = prev.map(async (prevClient) => {
             if (!nextMap.has(prevClient.cedula)) {
               console.log(`[Smart Sync] Deleting client: ${prevClient.nombre} (${prevClient.cedula})`);
               await deleteClientFromFirebase(prevClient.cedula);
             }
-          }
+          });
+
+          await Promise.allSettled([...savePromises, ...deletePromises]);
           setSyncError(null);
         } catch (error) {
           console.error('[Smart Sync] Error syncing changes to Firebase:', error);
