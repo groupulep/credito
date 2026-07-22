@@ -150,13 +150,18 @@ export function subscribeToClients(onUpdate: (clients: Client[]) => void, onErro
   const q = collection(db, CLIENTS_COLLECTION);
   return onSnapshot(q, (querySnapshot) => {
     if (querySnapshot.empty) {
-      console.log('No clients found in snapshot. Seeding default clients...');
-      seedClientsToFirebase(PRE_SEEDED_CLIENTS).catch(err => console.error('Seeding error:', err));
+      onUpdate([]);
       return;
     }
     const clientsList: Client[] = [];
+    const testCedulas = ['12345', '98765', '11111'];
     querySnapshot.forEach((docSnap) => {
-      clientsList.push(docSnap.data() as Client);
+      const data = docSnap.data() as Client;
+      if (!testCedulas.includes(data.cedula)) {
+        clientsList.push(data);
+      } else {
+        deleteClientFromFirebase(data.cedula).catch(err => console.error('Error deleting test client:', err));
+      }
     });
     onUpdate(clientsList);
   }, (error) => {

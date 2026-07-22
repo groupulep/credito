@@ -68,109 +68,29 @@ export function generateAmortizationSchedule(
   return schedule;
 }
 
-// Pre-seeded initial client list
-export const PRE_SEEDED_CLIENTS: Client[] = [
-  {
-    cedula: '12345',
-    contrasena: '12345',
-    nombre: 'Juan Pérez',
-    correo: 'juan.perez@email.com',
-    telefono: '3001234567',
-    direccion: 'Calle Luna 123, Bogotá',
-    prestamo: null, // will be configured below
-  },
-  {
-    cedula: '98765',
-    contrasena: '98765',
-    nombre: 'María Rodríguez',
-    correo: 'maria.rod@email.com',
-    telefono: '3159876543',
-    direccion: 'Carrera 45 #89, Medellín',
-    prestamo: null, // will be configured below
-  },
-  {
-    cedula: '11111',
-    contrasena: '11111',
-    nombre: 'Carlos Mendoza',
-    correo: 'carlos.mendoza@email.com',
-    telefono: '3201111111',
-    direccion: 'Avenida Siempre Viva 742, Cali',
-    prestamo: null, // will be configured below
-  },
-];
-
-// Initialize pre-seeded loans with history
-const initPreseededLoans = () => {
-  // 1. Juan Pérez: Préstamo vigente de 10,000, 2.0% mensual, 12 meses, iniciado hace 4 meses (e.g. 2026-03-01)
-  const JuanSchedule = generateAmortizationSchedule(10000, 2.0, 12, '2026-03-01');
-  // Mark 4 installments as paid
-  for (let i = 0; i < 4; i++) {
-    JuanSchedule[i].pagado = true;
-    JuanSchedule[i].fechaPago = addMonths('2026-03-01', i + 1);
-  }
-  PRE_SEEDED_CLIENTS[0].prestamo = {
-    id: 'loan-juan',
-    montoOriginal: 10000,
-    tasaInteresMensual: 2.0,
-    plazoMeses: 12,
-    fechaInicio: '2026-03-01',
-    estado: 'vigente',
-    cuotas: JuanSchedule,
-  };
-
-  // 2. María Rodríguez: Préstamo atrasado de 5000, 3.0% mensual, 6 meses, iniciado hace 4 meses (e.g. 2026-03-01)
-  // Since it's now 2026-07-01 (4 months since start), installments 1 and 2 are paid, but 3 and 4 are overdue (pendiente and date passed)
-  const MariaSchedule = generateAmortizationSchedule(5000, 3.0, 6, '2026-03-01');
-  // Mark 2 installments as paid
-  for (let i = 0; i < 2; i++) {
-    MariaSchedule[i].pagado = true;
-    MariaSchedule[i].fechaPago = addMonths('2026-03-01', i + 1);
-  }
-  // The rest are unpaid. Maria is in arrears ('atrasado')
-  PRE_SEEDED_CLIENTS[1].prestamo = {
-    id: 'loan-maria',
-    montoOriginal: 5000,
-    tasaInteresMensual: 3.0,
-    plazoMeses: 6,
-    fechaInicio: '2026-03-01',
-    estado: 'atrasado',
-    cuotas: MariaSchedule,
-  };
-
-  // 3. Carlos Mendoza: Préstamo cancelado/apto de 4000, 1.5% mensual, 6 meses, iniciado hace 8 meses (e.g. 2025-10-01)
-  const CarlosSchedule = generateAmortizationSchedule(4000, 1.5, 6, '2025-10-01');
-  // All paid
-  for (let i = 0; i < 6; i++) {
-    CarlosSchedule[i].pagado = true;
-    CarlosSchedule[i].fechaPago = addMonths('2025-10-01', i + 1);
-  }
-  PRE_SEEDED_CLIENTS[2].prestamo = {
-    id: 'loan-carlos',
-    montoOriginal: 4000,
-    tasaInteresMensual: 1.5,
-    plazoMeses: 6,
-    fechaInicio: '2025-10-01',
-    estado: 'cancelado',
-    cuotas: CarlosSchedule,
-  };
-};
-
-initPreseededLoans();
+// Pre-seeded initial client list (Empty by default)
+export const PRE_SEEDED_CLIENTS: Client[] = [];
 
 const LOCAL_STORAGE_KEY = 'crediulep_db';
 
 export function getDatabase(): Client[] {
-  if (typeof window === 'undefined') return PRE_SEEDED_CLIENTS;
+  if (typeof window === 'undefined') return [];
   const data = localStorage.getItem(LOCAL_STORAGE_KEY);
   if (!data) {
-    saveDatabase(PRE_SEEDED_CLIENTS);
-    return PRE_SEEDED_CLIENTS;
+    saveDatabase([]);
+    return [];
   }
   try {
-    return JSON.parse(data);
+    const clients: Client[] = JSON.parse(data);
+    const testCedulas = ['12345', '98765', '11111'];
+    const filtered = clients.filter((c) => !testCedulas.includes(c.cedula));
+    if (filtered.length !== clients.length) {
+      saveDatabase(filtered);
+    }
+    return filtered;
   } catch (e) {
     console.error('Error parsing localStorage database', e);
-    return PRE_SEEDED_CLIENTS;
+    return [];
   }
 }
 
